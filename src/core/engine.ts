@@ -130,31 +130,65 @@ export async function executeQuery(
         try {
           // Get API key and model from config
           const config = getConfig()
+          
+          // Check for API key in config first, then environment variables
           const apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY
           const model = config.model || 'claude-3-sonnet-20240229'
+          
+          console.log('DEBUG - API Key sources:');
+          console.log('config.apiKey:', config.apiKey ? 'PRESENT' : 'MISSING');
+          console.log('process.env.ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'PRESENT' : 'MISSING');
+          console.log('process.env.CLAUDE_API_KEY:', process.env.CLAUDE_API_KEY ? 'PRESENT' : 'MISSING');
+          console.log('Final apiKey:', apiKey ? 'PRESENT' : 'MISSING');
           
           if (!apiKey) {
             throw new Error('No API key found. Please set an API key in the configuration or environment.')
           }
           
-          // Create a basic conversation history
-          const messages = [
-            {
-              role: 'user',
-              content: content
+          // Ensure the API key is available to the OpenAI client by setting it in config
+          if (apiKey) {
+            // Set the API key in config directly for this request
+            if (!config.smallModelApiKeys) {
+              config.smallModelApiKeys = [];
             }
-          ]
+            if (!config.smallModelApiKeys.includes(apiKey)) {
+              config.smallModelApiKeys.push(apiKey);
+            }
+            
+            // Also set as primary key if none exists
+            if (!config.primaryApiKey) {
+              config.primaryApiKey = apiKey;
+            }
+          }
           
           // Use the appropriate model based on config
           let apiResponse
           if (model.includes('haiku')) {
+            console.log('DEBUG - Calling queryHaiku with parameters:');
+            console.log('apiKey:', apiKey ? 'PRESENT' : 'MISSING');
+            console.log('systemPrompt:', Array.isArray(context.systemPrompt) 
+              ? context.systemPrompt 
+              : [context.systemPrompt]);
+            console.log('userPrompt:', content);
+            console.log('maxTokens:', 1000);
+            
             apiResponse = await queryHaiku({
-              apiKey,
-              messages,
-              systemPrompt: context.systemPrompt,
+              apiKey: apiKey,
+              systemPrompt: Array.isArray(context.systemPrompt) 
+                ? context.systemPrompt 
+                : [context.systemPrompt],
+              userPrompt: content,
               maxTokens: 1000
             })
           } else {
+            // Create message object for sonnet model
+            const messages = [
+              {
+                role: 'user',
+                content: content
+              }
+            ]
+            
             apiResponse = await querySonnet(
               apiKey,
               messages,

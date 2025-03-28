@@ -122,3 +122,18 @@ export function getCommand(commandName: string, commands: Command[]): Command {
 
   return command
 }
+
+/**
+ * Record/dictionary type for commands, mapping command names to Command objects
+ */
+export type Commands = Record<string, Command>;
+
+/**
+ * Convert the array of commands to a dictionary for API use
+ */
+export function getCommandRegistry(): Commands {
+  return COMMANDS().reduce((acc, command) => {
+    acc[command.name] = command;
+    return acc;
+  }, {} as Commands);
+}

@@ -53,3 +53,16 @@ export const env = {
   nodeVersion: process.version,
   terminal: process.env.TERM_PROGRAM,
 }
+
+/**
+ * Get environment information for API context
+ */
+export async function getEnvInfo(): Promise<any> {
+  return {
+    isDocker: await getIsDocker(),
+    platform: env.platform,
+    nodeVersion: env.nodeVersion,
+    isCI: env.isCI,
+    today: new Date().toISOString().split('T')[0],
+  }
+}

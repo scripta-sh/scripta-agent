@@ -1,8 +1,15 @@
 import express from 'express'
 import cors from 'cors'
 import { z } from 'zod'
-import apiRoutes from '../services/apiRoutes'
+import { enableConfigs } from '../utils/config'
 import { logError } from '../utils/log'
+
+// Enable config reading - this is critical for the API to work properly
+// It must be called before any imports that might access the config
+enableConfigs()
+
+// Import routes after enabling config
+import apiRoutes from '../services/apiRoutes'
 
 // Initialize the Express application
 const app = express()
