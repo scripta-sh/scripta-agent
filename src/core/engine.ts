@@ -9,10 +9,11 @@ import { processMessage, MessageType } from './messageProcessor'
 import { executeTool } from './toolExecutor'
 import { getSystemPrompt } from '../constants/prompts'
 import { getAvailableTools } from './tools'
-import { getAnthropicApiKey } from '../utils/config'
+import { getAnthropicApiKey, getConfig } from '../utils/config'
 import { getCwd } from '../utils/state'
 import { getEnvInfo } from '../utils/env'
 import { v4 as uuidv4 } from 'uuid'
+import { querySonnet, queryHaiku } from '../services/claude'
 import type { Commands } from '../commands'
 
 /**
@@ -125,16 +126,70 @@ export async function executeQuery(
       case MessageType.TEXT:
       default:
         // Regular text message - forward to Claude API
-        // In Phase 1, we'll simulate a response for testing
-        // TODO: Implement actual Claude API call
-        response = {
-          type: 'text',
-          message: {
-            content: [{
-              type: 'text',
-              text: `[API Test Response] I received your message: "${content}"`,
-            }],
-          },
+        try {
+          // Get API key and model from config
+          const apiKey = await getAnthropicApiKey()
+          const config = getConfig()
+          const model = config.model || 'claude-3-sonnet-20240229'
+          
+          // Create a basic conversation history
+          const messages = [
+            {
+              role: 'user',
+              content: content
+            }
+          ]
+          
+          // Use the appropriate model based on config
+          let apiResponse
+          if (model.includes('haiku')) {
+            apiResponse = await queryHaiku({
+              apiKey,
+              messages,
+              systemPrompt: context.systemPrompt,
+              maxTokens: 1000
+            })
+          } else {
+            apiResponse = await querySonnet(
+              apiKey,
+              messages,
+              context.systemPrompt,
+              undefined, // fileUploads
+              { maxTokens: 1000 }
+            )
+          }
+          
+          // Format the response
+          response = {
+            type: 'text',
+            message: {
+              content: [{
+                type: 'text',
+                text: apiResponse.content[0].text,
+              }],
+            },
+          }
+          
+          // Log successful API call
+          logEvent('api_claude_call', {
+            success: 'true',
+            model,
+            messageLength: content.length.toString(),
+          })
+        } catch (apiError) {
+          console.error('Claude API error:', apiError)
+          logEvent('api_claude_call', { success: 'false' })
+          
+          // Return a friendly error message
+          response = {
+            type: 'error',
+            message: {
+              content: [{
+                type: 'text',
+                text: 'Sorry, I encountered an error connecting to Claude. Please check your API key and try again.',
+              }],
+            },
+          }
         }
         break
     }
