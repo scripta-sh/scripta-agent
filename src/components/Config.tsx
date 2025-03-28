@@ -8,6 +8,9 @@ import {
   saveGlobalConfig,
   normalizeApiKeyForConfig,
   ProviderType,
+  addApiKey,
+  removeApiKey,
+  getApiKeys,
 } from '../utils/config.js'
 import { getGlobalConfig } from '../utils/config'
 import chalk from 'chalk'
@@ -51,6 +54,14 @@ type Setting =
       type: 'number',
       disabled?: boolean
     }
+  | {
+      id: string
+      label: string
+      value: string[]
+      onChange(value: string[]): void
+      type: 'apiKeys',
+      disabled?: boolean
+    }
 
 export function Config({ onClose }: Props): React.ReactNode {
   const [globalConfig, setGlobalConfig] = useState(getGlobalConfig())
@@ -60,6 +71,8 @@ export function Config({ onClose }: Props): React.ReactNode {
   const [editingString, setEditingString] = useState(false)
   const [currentInput, setCurrentInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
+  const [editingApiKey, setEditingApiKey] = useState<'small' | 'large' | null>(null)
+  const [selectedKeyIndex, setSelectedKeyIndex] = useState<number | null>(null)
 
   // TODO: Add MCP servers
   const settings: Setting[] = [
@@ -99,16 +112,16 @@ export function Config({ onClose }: Props): React.ReactNode {
       },
     },
     {
-      id: 'small_apiKey',
-      label: `API key for small model`,
-      value: globalConfig.smallModelApiKey ?? '',
-      type: 'string',
+      id: 'small_apiKeys',
+      label: `API keys for small model`,
+      value: getApiKeys(globalConfig, 'small'),
+      type: 'apiKeys',
       disabled: !getGlobalConfig().smallModelApiKeyRequired,
-      onChange(value: string) {
-        const config = { ...getGlobalConfig(), smallModelApiKey: value }
+      onChange(value: string[]) {
+        const config = { ...getGlobalConfig(), smallModelApiKeys: value }
         saveGlobalConfig(config)
         setGlobalConfig(config)
-      },
+      }
     },
     {
       id: 'smallModelBaseURL',
@@ -167,16 +180,16 @@ export function Config({ onClose }: Props): React.ReactNode {
       },
     },
     {
-      id: 'large_apiKey',
-      label: `API key for large model`,
-      value: globalConfig.largeModelApiKey ?? '',
-      type: 'string',
+      id: 'large_apiKeys',
+      label: `API keys for large model`,
+      value: getApiKeys(globalConfig, 'large'),
+      type: 'apiKeys',
       disabled: !getGlobalConfig().largeModelApiKeyRequired,
-      onChange(value: string) {
-        const config = { ...getGlobalConfig(), largeModelApiKey: value }
+      onChange(value: string[]) {
+        const config = { ...getGlobalConfig(), largeModelApiKeys: value }
         saveGlobalConfig(config)
         setGlobalConfig(config)
-      },
+      }
     },  
     {
       id: 'largeModelBaseURL',
@@ -281,11 +294,11 @@ export function Config({ onClose }: Props): React.ReactNode {
 
   useInput((input, key) => {
     if (editingString) {
-      // Handle input when editing a string value
       if (key.escape) {
         setEditingString(false)
         setCurrentInput('')
         setInputError(null)
+        setSelectedKeyIndex(null)
         return
       }
 
@@ -301,10 +314,21 @@ export function Config({ onClose }: Props): React.ReactNode {
             setInputError('Invalid number')
             return
           }
+        } else if (setting.type === 'apiKeys') {
+          const config = getGlobalConfig()
+          if (editingApiKey) {
+            if (currentInput.trim()) {
+              addApiKey(config, currentInput, editingApiKey)
+              saveGlobalConfig(config)
+              setGlobalConfig(config)
+            }
+          }
         }
         setEditingString(false)
         setCurrentInput('')
         setInputError(null)
+        setEditingApiKey(null)
+        setSelectedKeyIndex(null)
         return
       }
 
@@ -313,13 +337,9 @@ export function Config({ onClose }: Props): React.ReactNode {
         return
       }
 
-      // Add all input characters to the string (including pasted content)
       if (input) {
         try {
-          // Clean the input: remove newlines and other control characters
-          const cleanedInput = input
-            .replace(/[\r\n\t]/g, '') // Remove newlines and tabs
-          
+          const cleanedInput = input.replace(/[\r\n\t]/g, '')
           if (cleanedInput) {
             setCurrentInput(prev => prev + cleanedInput)
             setInputError(null)
@@ -373,6 +393,7 @@ export function Config({ onClose }: Props): React.ReactNode {
         console.log(chalk.gray(changes.join('\n')))
       }
       onClose()
+      setSelectedKeyIndex(null)
       return
     }
 
@@ -403,6 +424,14 @@ export function Config({ onClose }: Props): React.ReactNode {
         setCurrentInput(setting.value?.toString() ?? '')
         return
       }
+
+      if (setting.type === 'apiKeys') {
+        const modelType = setting.id.includes('small') ? 'small' : 'large'
+        setEditingApiKey(modelType)
+        setEditingString(true)
+        setCurrentInput('')
+        return
+      }
     }
 
     if (key.return || input === ' ') {
@@ -410,19 +439,39 @@ export function Config({ onClose }: Props): React.ReactNode {
       return
     }
 
-    // Find next setting index glossing over disabled fields
+    // Handle API key selection and deletion
+    const setting = settings[selectedIndex]
+    if (setting?.type === 'apiKeys') {
+      if (key.leftArrow) {
+        setSelectedKeyIndex(prev => prev === null ? setting.value.length - 1 : Math.max(0, prev - 1))
+        return
+      }
+      if (key.rightArrow) {
+        setSelectedKeyIndex(prev => prev === null ? 0 : Math.min(setting.value.length - 1, prev + 1))
+        return
+      }
+      if ((key.backspace || key.delete) && selectedKeyIndex !== null) {
+        const config = getGlobalConfig()
+        const modelType = setting.id.includes('small') ? 'small' : 'large'
+        removeApiKey(config, setting.value[selectedKeyIndex], modelType)
+        saveGlobalConfig(config)
+        setGlobalConfig(config)
+        setSelectedKeyIndex(null)
+        return
+      }
+    }
+
     const moveSelection = (direction: -1 | 1) => {
       let newIndex = selectedIndex;
     
       while (true) {
         newIndex += direction;
     
-        // Stop if out of bounds
         if (newIndex < 0 || newIndex >= settings.length) return;
     
-        // Set new index if it's not disabled
         if (!settings[newIndex].disabled) {
           setSelectedIndex(newIndex);
+          setSelectedKeyIndex(null)
           return;
         }
       }
@@ -448,54 +497,83 @@ export function Config({ onClose }: Props): React.ReactNode {
 
         {settings.map((setting, i) => {
           const isSelected = i === selectedIndex
-          const isEditing = isSelected && editingString && (setting.type === 'string' || setting.type === 'number')
+          const isEditing = isSelected && editingString
 
           return (
-            <Box key={setting.id} height={2} minHeight={2}>
-              <Box width={44}>
-                <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
-                  {isSelected ? figures.pointer : ' '} {setting.label}
-                </Text>
-              </Box>
+            <Box key={setting.id} flexDirection="column">
               <Box>
-                {setting.type === 'boolean' ? (
+                <Box width={44}>
                   <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
-                    {setting.value.toString()}
+                    {isSelected ? figures.pointer : ' '} {setting.label}
                   </Text>
-                ) : setting.type === 'string' ? (
-                  isEditing ? (
-                    <Box>
-                      <Text backgroundColor="blue" color="white">
-                        {currentInput || ' '}<Text color="white">_</Text>
-                      </Text>
-                      {inputError && <Text color="red"> {inputError}</Text>}
-                    </Box>
-                  ) : (
+                </Box>
+                <Box>
+                  {setting.type === 'boolean' ? (
                     <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
-                      {setting.value ? normalizeApiKeyForConfig(setting.value) : '(not set)'} {isSelected ? '[Enter to edit]' : ''}
+                      {setting.value.toString()}
                     </Text>
-                  )
-                ) : setting.type === 'number' ? (
-                  isEditing ? (
-                    <Box>
-                      <Text backgroundColor="blue" color="white">
-                        {currentInput || ' '}<Text color="white">_</Text>
+                  ) : setting.type === 'string' ? (
+                    isEditing ? (
+                      <Box>
+                        <Text backgroundColor="blue" color="white">
+                          {currentInput || ' '}<Text color="white">_</Text>
+                        </Text>
+                        {inputError && <Text color="red"> {inputError}</Text>}
+                      </Box>
+                    ) : (
+                      <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
+                        {setting.value ? normalizeApiKeyForConfig(setting.value) : '(not set)'} {isSelected ? '[Enter to edit]' : ''}
                       </Text>
-                      {inputError && <Text color="red"> {inputError}</Text>}
-                    </Box>
-                  ) : (
+                    )
+                  ) : setting.type === 'number' ? (
+                    isEditing ? (
+                      <Box>
+                        <Text backgroundColor="blue" color="white">
+                          {currentInput || ' '}<Text color="white">_</Text>
+                        </Text>
+                        {inputError && <Text color="red"> {inputError}</Text>}
+                      </Box>
+                    ) : (
+                      <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
+                        {setting.value ? setting.value : '(not set)'} {isSelected ? '[Enter to edit]' : ''}
+                      </Text>
+                    )
+                  ) : setting.type === 'enum' ? (
                     <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
-                      {setting.value ? setting.value : '(not set)'} {isSelected ? '[Enter to edit]' : ''}
+                      {setting.value}
                     </Text>
-                  )
-                ) : setting.type === 'enum' ? (
-                  <Text color={isSelected ? 'blue' : undefined} dimColor={setting.disabled ? true : undefined}>
-                    {setting.value}
-                  </Text>
-                ) : (
-                  <Text color={isSelected ? 'blue' : undefined}>
-                  </Text>
-                )}
+                  ) : setting.type === 'apiKeys' ? (
+                    <Box flexDirection="column" gap={1}>
+                      <Box flexDirection="column">
+                        {setting.value.map((key, idx) => (
+                          <Box key={`${setting.id}-${idx}`}>
+                            <Text 
+                              color={isSelected && selectedKeyIndex === idx ? 'red' : isSelected ? 'blue' : undefined} 
+                              dimColor={setting.disabled ? true : undefined}
+                            >
+                              {normalizeApiKeyForConfig(key)}
+                            </Text>
+                          </Box>
+                        ))}
+                        {isEditing && (
+                          <Box>
+                            <Text backgroundColor="blue" color="white">
+                              {currentInput || ' '}<Text color="white">_</Text>
+                            </Text>
+                            {inputError && <Text color="red"> {inputError}</Text>}
+                          </Box>
+                        )}
+                      </Box>
+                      {isSelected && !isEditing && (
+                        <Text dimColor>
+                          {selectedKeyIndex !== null 
+                            ? '[←/→ to select key, Delete/Backspace to remove]' 
+                            : '[Enter to add new key, ←/→ to select key]'}
+                        </Text>
+                      )}
+                    </Box>
+                  ) : null}
+                </Box>
               </Box>
             </Box>
           )

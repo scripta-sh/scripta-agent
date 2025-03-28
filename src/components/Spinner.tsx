@@ -3,7 +3,7 @@ import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { getTheme } from '../utils/theme'
 import { sample } from 'lodash-es'
-
+import { getSessionState } from '../utils/sessionState'
 // NB: The third character in this string is an emoji that
 // renders on Windows consoles with a green background
 const CHARACTERS =
@@ -20,7 +20,7 @@ const MESSAGES = [
   'Calculating',
   'Cerebrating',
   'Churning',
-  'Clauding',
+  'Koding',
   'Coalescing',
   'Cogitating',
   'Computing',
@@ -101,6 +101,9 @@ export function Spinner(): React.ReactNode {
       <Text color={getTheme().claude}>{message.current}… </Text>
       <Text color={getTheme().secondaryText}>
         ({elapsedTime}s · <Text bold>esc</Text> to interrupt)
+      </Text>
+      <Text color={getTheme().secondaryText}>
+        · {getSessionState('currentError')}
       </Text>
     </Box>
   )

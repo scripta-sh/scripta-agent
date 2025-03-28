@@ -39,7 +39,6 @@ async function getFrequentlyModifiedFiles(): Promise<string[]> {
       )
       filenames += '\n\nFiles modified by other users:\n' + allFilenames
     }
-
     const response = await queryHaiku({
       systemPrompt: [
         "You are an expert at analyzing git history. Given a list of files and their modification counts, return exactly five filenames that are frequently modified and represent core application logic (not auto-generated files, dependencies, or configuration). Make sure filenames are diverse, not all in the same folder, and are a mix of user and other users. Return only the filenames' basenames (without the path) separated by newlines with no explanation.",
@@ -80,18 +79,18 @@ export const getExampleCommands = memoize(async (): Promise<string[]> => {
   }
   saveGlobalConfig(newGlobalConfig)
 
-  // If no example files cached, kickstart fetch in background
-  if (!projectConfig.exampleFiles?.length) {
-    getFrequentlyModifiedFiles().then(files => {
-      if (files.length) {
-        saveCurrentProjectConfig({
-          ...getCurrentProjectConfig(),
-          exampleFiles: files,
-          exampleFilesGeneratedAt: Date.now(),
-        })
-      }
-    })
-  }
+  // // If no example files cached, kickstart fetch in background
+  // if (!projectConfig.exampleFiles?.length) {
+  //   getFrequentlyModifiedFiles().then(files => {
+  //     if (files.length) {
+  //       saveCurrentProjectConfig({
+  //         ...getCurrentProjectConfig(),
+  //         exampleFiles: files,
+  //         exampleFilesGeneratedAt: Date.now(),
+  //       })
+  //     }
+  //   })
+  // }
 
   const frequentFile = projectConfig.exampleFiles?.length
     ? sample(projectConfig.exampleFiles)
