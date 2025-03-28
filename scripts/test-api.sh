@@ -26,4 +26,4 @@ NODE_ENV=development tsx ./src/tests/api-test.ts
 
 echo "==========================================="
 echo "  Test Script Complete                    "
-echo "===========================================
+echo "==========================================="
