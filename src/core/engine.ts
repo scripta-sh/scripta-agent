@@ -9,7 +9,8 @@ import { processMessage, MessageType } from './messageProcessor'
 import { executeTool } from './toolExecutor'
 import { getSystemPrompt } from '../constants/prompts'
 import { getAvailableTools } from './tools'
-import { getAnthropicApiKey, getConfig } from '../utils/config'
+// Using direct environment variables instead of config utility
+import { getConfig } from './config'
 import { getCwd } from '../utils/state'
 import { getEnvInfo } from '../utils/env'
 import { v4 as uuidv4 } from 'uuid'
@@ -128,9 +129,13 @@ export async function executeQuery(
         // Regular text message - forward to Claude API
         try {
           // Get API key and model from config
-          const apiKey = await getAnthropicApiKey()
           const config = getConfig()
+          const apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY
           const model = config.model || 'claude-3-sonnet-20240229'
+          
+          if (!apiKey) {
+            throw new Error('No API key found. Please set an API key in the configuration or environment.')
+          }
           
           // Create a basic conversation history
           const messages = [

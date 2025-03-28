@@ -3,8 +3,14 @@
  * Run with: NODE_ENV=development tsx src/tests/api-test.ts
  */
 
+import { config } from 'dotenv'
+import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import fetch from 'node-fetch'
+
+// Load environment variables from .env.dev file
+config({ path: path.resolve(process.cwd(), '.env.dev') })
+console.log('Loaded API key from .env.dev for testing')
 
 // API base URL
 const API_URL = 'http://localhost:3000/api'
@@ -32,6 +38,7 @@ async function testAPI() {
     // 2.2 Update config
     console.log('2.2 Updating config...')
     const testConfig = {
+      apiKey: process.env.ANTHROPIC_API_KEY, // Use API key from .env.dev
       model: 'claude-3-haiku-20240307',
       requireApiKey: false,
       trustTools: ['BashTool', 'FileReadTool']
