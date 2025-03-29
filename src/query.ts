@@ -12,11 +12,12 @@ import {
 import { CanUseToolFn } from './hooks/useCanUseTool'
 import {
   formatSystemPromptWithContext,
-  querySonnet,
+  queryAnthropicModel,
 } from './services/claude.js'
 import { logEvent } from './services/statsig'
 import { all } from './utils/generators'
 import { logError } from './utils/log'
+import { getGlobalConfig } from './utils/config'
 import {
   createAssistantMessage,
   createProgressMessage,
@@ -134,19 +135,41 @@ export async function* query(
 ): AsyncGenerator<Message, void> {
   const fullSystemPrompt = formatSystemPromptWithContext(systemPrompt, context)
   function getAssistantResponse() {
-    return querySonnet(
-      normalizeMessagesForAPI(messages),
-      fullSystemPrompt,
-      toolUseContext.options.maxThinkingTokens,
-      toolUseContext.options.tools,
-      toolUseContext.abortController.signal,
-      {
-        dangerouslySkipPermissions:
-          toolUseContext.options.dangerouslySkipPermissions ?? false,
-        model: toolUseContext.options.slowAndCapableModel,
-        prependCLISysprompt: true,
-      },
-    )
+    const config = getGlobalConfig()
+    const provider = config.primaryProvider
+    
+    if (provider === 'anthropic') {
+      return queryAnthropicModel(
+        normalizeMessagesForAPI(messages),
+        fullSystemPrompt,
+        toolUseContext.options.maxThinkingTokens,
+        toolUseContext.options.tools,
+        toolUseContext.abortController.signal,
+        {
+          dangerouslySkipPermissions:
+            toolUseContext.options.dangerouslySkipPermissions ?? false,
+          model: toolUseContext.options.slowAndCapableModel,
+          prependCLISysprompt: true,
+        },
+      )
+    } else {
+      // For OpenAI and other providers
+      // Import queryOpenAI from claude module
+      return import('./services/claude.js').then(({ queryOpenAI }) => queryOpenAI(
+        'large',
+        normalizeMessagesForAPI(messages),
+        fullSystemPrompt,
+        toolUseContext.options.maxThinkingTokens,
+        toolUseContext.options.tools,
+        toolUseContext.abortController.signal,
+        {
+          dangerouslySkipPermissions:
+            toolUseContext.options.dangerouslySkipPermissions ?? false,
+          model: toolUseContext.options.slowAndCapableModel,
+          prependCLISysprompt: true,
+        }
+      ))
+    }
   }
 
   const result = await queryWithBinaryFeedback(

@@ -223,6 +223,13 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       // For custom provider, save and exit
       saveConfiguration(providerType, selectedModel || config.largeModelName || '')
       onDone()
+    } else if (provider === 'anthropic') {
+      // For Anthropic, fetch models directly
+      setApiKey(''); // Clear any previous API key
+      fetchModels()
+        .catch(error => {
+          setModelLoadError(`Error loading models: ${error.message}`)
+        })
     } else {
       // For other providers, go to API key input
       navigateTo('apiKey')
@@ -256,12 +263,42 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       throw error
     }
   }
+  async function fetchAnthropicModels() {
+    try {
+      // For Anthropic, we'll use the predefined models from our constants
+      const anthropicModelsList = models.anthropic || [];
+      
+      // Format the models to match our ModelInfo format
+      const anthropicModels = anthropicModelsList.map(model => ({
+        model: model.model,
+        provider: 'anthropic',
+        max_tokens: model.max_output_tokens || model.max_tokens,
+        supports_vision: model.supports_vision || false,
+        supports_function_calling: model.supports_function_calling || false,
+        supports_reasoning_effort: model.supports_reasoning_effort || false
+      }));
+      
+      return anthropicModels;
+    } catch (error) {
+      setModelLoadError(`Failed to load Anthropic models: ${error.message}`);
+      throw error;
+    }
+  }
+
   async function fetchModels() {
     setIsLoadingModels(true)
     setModelLoadError(null)
     
     try {
-      // For Gemini, use the separate fetchGeminiModels function
+      // Special handling for Anthropic models - use predefined models from constants
+      if (selectedProvider === 'anthropic') {
+        const anthropicModels = await fetchAnthropicModels()
+        setAvailableModels(anthropicModels)
+        navigateTo('model')
+        return anthropicModels
+      }
+      
+      // Special handling for Gemini
       if (selectedProvider === 'gemini') {
         const geminiModels = await fetchGeminiModels()
         setAvailableModels(geminiModels)
@@ -269,8 +306,14 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
         return geminiModels
       }
       
-      // For all other providers, use the OpenAI client
+      // For all other OpenAI-compatible providers, use the OpenAI client
       const baseURL = providers[selectedProvider]?.baseURL
+
+      // Skip API call if no API key provided (for some providers it's optional)
+      if (!apiKey && selectedProvider !== 'custom') {
+        setModelLoadError('API key is required to fetch model list');
+        return [];
+      }
 
       const openai = new OpenAI({
         apiKey: apiKey,
@@ -288,7 +331,7 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
         fetchedModels.push({
           model: model.id,
           provider: selectedProvider,
-          max_tokens: modelInfo?.max_output_tokens,
+          max_tokens: modelInfo?.max_output_tokens || modelInfo?.max_tokens,
           supports_vision: modelInfo?.supports_vision || false,
           supports_function_calling: modelInfo?.supports_function_calling || false,
           supports_reasoning_effort: modelInfo?.supports_reasoning_effort || false
@@ -363,47 +406,58 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     // Update the primary provider regardless of which model we're changing
     newConfig.primaryProvider = provider
     
+    // Set API key requirement - Anthropic models need API key but it can come from environment
+    const apiKeyRequired = provider !== 'custom' && provider !== 'ollama';
+    
+    // Get appropriate environment variable name for this provider
+    const envApiKeyName = `${provider.toUpperCase()}_API_KEY`;
+    const hasEnvApiKey = process.env[envApiKeyName] ? true : false;
+    
     // Update the appropriate model based on the selection
     if (modelTypeToChange === 'both' || modelTypeToChange === 'large') {
       newConfig.largeModelName = model
       newConfig.largeModelBaseURL = baseURL
-      if (apiKey) {
+      
+      // Only set API key in config if provided and not already in environment
+      if (apiKey && (!hasEnvApiKey || provider === 'anthropic')) {
         newConfig.largeModelApiKeys = [apiKey]
       }
+      
       if (maxTokens) {
         newConfig.largeModelMaxTokens = parseInt(maxTokens)
       }
+      
       if (reasoningEffort) {
         newConfig.largeModelReasoningEffort = reasoningEffort
       } else {
         newConfig.largeModelReasoningEffort = undefined
       }
-      if(apiKey) {
-        newConfig.largeModelApiKeyRequired = true
-      } else {
-        newConfig.largeModelApiKeyRequired = false
-      }
+      
+      // Set API key requirement based on provider
+      newConfig.largeModelApiKeyRequired = apiKeyRequired && !hasEnvApiKey
     }
     
     if (modelTypeToChange === 'both' || modelTypeToChange === 'small') {
       newConfig.smallModelName = model
       newConfig.smallModelBaseURL = baseURL
-      if (apiKey) {
+      
+      // Only set API key in config if provided and not already in environment
+      if (apiKey && (!hasEnvApiKey || provider === 'anthropic')) {
         newConfig.smallModelApiKeys = [apiKey]
       }
+      
       if (maxTokens) {
         newConfig.smallModelMaxTokens = parseInt(maxTokens)
       }
+      
       if (reasoningEffort) {
         newConfig.smallModelReasoningEffort = reasoningEffort
       } else {
         newConfig.smallModelReasoningEffort = undefined
       }
-      if(apiKey) {
-        newConfig.smallModelApiKeyRequired = true
-      } else {
-        newConfig.smallModelApiKeyRequired = false
-      }
+      
+      // Set API key requirement based on provider
+      newConfig.smallModelApiKeyRequired = apiKeyRequired && !hasEnvApiKey
     }
     
     // Save the updated configuration

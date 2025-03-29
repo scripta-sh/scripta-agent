@@ -317,6 +317,9 @@ export async function getCompletion(
   }
 
   try {
+    // Log API call details
+    console.log(`🔄 API Call: ${config.primaryProvider === 'openai' ? 'OpenAI' : config.primaryProvider} | Model: ${opts.model} | Endpoint: ${baseURL}/chat/completions`)
+    
     if (opts.stream) {
       const response = await fetch(`${baseURL}/chat/completions`, {
         method: 'POST',
@@ -402,6 +405,9 @@ export async function getCompletion(
         }
       })()
     }
+    
+    // Log API call for non-streaming case
+    console.log(`🔄 API Call: ${config.primaryProvider === 'openai' ? 'OpenAI' : config.primaryProvider} | Model: ${opts.model} | Endpoint: ${baseURL}/chat/completions (non-streaming)`)
     
     const response = await fetch(`${baseURL}/chat/completions`, {
       method: 'POST',

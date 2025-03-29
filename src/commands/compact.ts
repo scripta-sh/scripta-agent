@@ -1,7 +1,7 @@
 import { Command } from '../commands'
 import { getContext } from '../context'
 import { getMessagesGetter, getMessagesSetter } from '../messages'
-import { API_ERROR_MESSAGE_PREFIX, querySonnet } from '../services/claude'
+import { API_ERROR_MESSAGE_PREFIX, queryAnthropicModel } from '../services/claude'
 import {
   createUserMessage,
   normalizeMessagesForAPI,
@@ -31,7 +31,7 @@ const compact = {
       "Provide a detailed but concise summary of our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next.",
     )
 
-    const summaryResponse = await querySonnet(
+    const summaryResponse = await queryAnthropicModel(
       normalizeMessagesForAPI([...messages, summaryRequest]),
       ['You are a helpful AI assistant tasked with summarizing conversations.'],
       0,

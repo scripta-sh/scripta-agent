@@ -823,17 +823,60 @@ export function normalizeMessagesForAPI(
 // Sometimes the API returns empty messages (eg. "\n\n"). We need to filter these out,
 // otherwise they will give an API error when we send them to the API next time we call query().
 export function normalizeContentFromAPI(
-  content: APIMessage['content'],
+  content: any
 ): APIMessage['content'] {
-  const filteredContent = content.filter(
-    _ => _.type !== 'text' || _.text.trim().length > 0,
-  )
+  try {
+    // Debug logging for troubleshooting
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Content in normalizeContentFromAPI:', JSON.stringify(content, null, 2));
+    }
+    
+    // Handle case where content is undefined or null
+    if (!content) {
+      console.log('Content was null/undefined in normalizeContentFromAPI');
+      return [{ type: 'text', text: NO_CONTENT_MESSAGE, citations: [] }];
+    }
 
-  if (filteredContent.length === 0) {
-    return [{ type: 'text', text: NO_CONTENT_MESSAGE, citations: [] }]
+    // Handle string content (sometimes OpenAI returns just a string)
+    if (typeof content === 'string') {
+      return [{ type: 'text', text: content || NO_CONTENT_MESSAGE, citations: [] }];
+    }
+
+    // For safety, create a default empty array if we have any error
+    let contentArray: any[] = [];
+
+    try {
+      // Handle both array and non-array content
+      contentArray = Array.isArray(content) ? content : [content];
+    } catch (err) {
+      console.error('Error converting content to array:', err);
+      return [{ type: 'text', text: NO_CONTENT_MESSAGE, citations: [] }];
+    }
+
+    // Filter safely
+    let filteredContent: any[] = [];
+    try {
+      filteredContent = contentArray.filter(item => {
+        if (!item) return false;
+        if (typeof item !== 'object') return false;
+        if (item.type !== 'text') return true;
+        return item.text && item.text.trim && item.text.trim().length > 0;
+      });
+    } catch (err) {
+      console.error('Error filtering content:', err);
+      return [{ type: 'text', text: NO_CONTENT_MESSAGE, citations: [] }];
+    }
+
+    if (!filteredContent || filteredContent.length === 0) {
+      return [{ type: 'text', text: NO_CONTENT_MESSAGE, citations: [] }];
+    }
+
+    return filteredContent;
+  } catch (err) {
+    // Ultimate fallback for any error
+    console.error('Unexpected error in normalizeContentFromAPI:', err);
+    return [{ type: 'text', text: 'Error processing response', citations: [] }];
   }
-
-  return filteredContent
 }
 
 export function isEmptyMessageText(text: string): boolean {

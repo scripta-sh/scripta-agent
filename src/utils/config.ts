@@ -153,6 +153,10 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   preferredNotifChannel: 'iterm2',
   verbose: false,
   primaryProvider: 'anthropic' as ProviderType,
+  largeModelName: 'claude-3-7-sonnet-20250219',
+  smallModelName: 'claude-3-5-haiku-20241022',
+  largeModelBaseURL: 'https://api.anthropic.com/v1',
+  smallModelBaseURL: 'https://api.anthropic.com/v1',
   customApiKeyResponses: {
     approved: [],
     rejected: [],
@@ -257,36 +261,30 @@ export function getGlobalConfig(): GlobalConfig {
   return getConfig(GLOBAL_CLAUDE_FILE, DEFAULT_GLOBAL_CONFIG)
 }
 
-// TODO: Decide what to do with this code
-// export function getAnthropicApiKey(): null | string {
-//   const config = getGlobalConfig()
-//   return process.env.ANTHROPIC_API_KEY;
-//   if (process.env.USER_TYPE === 'SWE_BENCH') {
-//     return process.env.ANTHROPIC_API_KEY_OVERRIDE ?? null
-//   }
-
-//   if (process.env.USER_TYPE === 'external') {
-//     return config.primaryApiKey ?? null
-//   }
-
-//   if (process.env.USER_TYPE === 'ant') {
-//     if (
-//       process.env.ANTHROPIC_API_KEY &&
-//       config.customApiKeyResponses?.approved?.includes(
-//         normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY),
-//       )
-//     ) {
-//       return process.env.ANTHROPIC_API_KEY
-//     }
-//     return config.primaryApiKey ?? null
-//   }
-
-//   return null
-// }
-
 export function getAnthropicApiKey(): null | string {
   const config = getGlobalConfig()
-  return process.env.SMALL_MODEL_API_KEY;
+  
+  // Check environment variables first
+  if (process.env.ANTHROPIC_API_KEY) {
+    return process.env.ANTHROPIC_API_KEY;
+  }
+  
+  // Fall back to API keys from config
+  if (config.primaryProvider === 'anthropic' && config.primaryApiKey) {
+    return config.primaryApiKey;
+  }
+  
+  // Check small model API keys
+  if (config.smallModelApiKeys && config.smallModelApiKeys.length > 0) {
+    return config.smallModelApiKeys[0];
+  }
+  
+  // Check large model API keys
+  if (config.largeModelApiKeys && config.largeModelApiKeys.length > 0) {
+    return config.largeModelApiKeys[0];
+  }
+  
+  return null;
 }
 
 export function normalizeApiKeyForConfig(apiKey: string): string {

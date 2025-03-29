@@ -610,28 +610,60 @@ function splitSysPromptPrefix(systemPrompt: string[]): string[] {
   return [systemPromptFirstBlock, systemPromptRest.join('\n')].filter(Boolean)
 }
 
-export async function querySonnet(
+export async function queryAnthropicModel(
   messages: (UserMessage | AssistantMessage)[],
   systemPrompt: string[],
-  maxThinkingTokens: number,
-  tools: Tool[],
-  signal: AbortSignal,
+  maxThinkingTokens = 0,
+  tools: Tool[] = [],
+  signal?: AbortSignal,
   options: {
-    dangerouslySkipPermissions: boolean
-    model: string
-    prependCLISysprompt: boolean
-  },
+    dangerouslySkipPermissions?: boolean;
+    model?: string;
+    prependCLISysprompt?: boolean;
+  } = {},
+  apiKey?: string,
 ): Promise<AssistantMessage> {
-  return await withVCR(messages, () =>
-    querySonnetWithPromptCaching(
+  if (process.env.NODE_ENV === 'development') {
+    console.log('querySonnet called with model:', options.model);
+  }
+  
+  // Override Anthropic API key if provided
+  if (apiKey) {
+    process.env.ANTHROPIC_API_KEY = apiKey;
+  }
+  
+  // Use the configuration from utils/config for the provider
+  const config = getGlobalConfig();
+  const provider = config.primaryProvider;
+  
+  // For OpenAI, Mistral, or other providers, use the respective query function
+  if (provider !== 'anthropic') {
+    return await queryOpenAI(
+      'large',
       messages,
       systemPrompt,
       maxThinkingTokens,
       tools,
-      signal,
+      signal || new AbortController().signal,
       options,
+    );
+  }
+  
+  // For Anthropic, use the existing implementation
+  return await withVCR(messages, () =>
+    queryAnthropicModelWithPromptCaching(
+      messages,
+      systemPrompt,
+      maxThinkingTokens,
+      tools,
+      signal || new AbortController().signal,
+      {
+        dangerouslySkipPermissions: options.dangerouslySkipPermissions || false,
+        model: options.model || 'claude-3-7-sonnet-20250219',
+        prependCLISysprompt: options.prependCLISysprompt || false,
+      },
     ),
-  )
+  );
 }
 
 export function formatSystemPromptWithContext(
@@ -651,7 +683,7 @@ export function formatSystemPromptWithContext(
   ]
 }
 
-async function querySonnetWithPromptCaching(
+async function queryAnthropicModelWithPromptCaching(
   messages: (UserMessage | AssistantMessage)[],
   systemPrompt: string[],
   maxThinkingTokens: number,
@@ -663,7 +695,131 @@ async function querySonnetWithPromptCaching(
     prependCLISysprompt: boolean
   },
 ): Promise<AssistantMessage> {
-  return queryOpenAI('large', messages, systemPrompt, maxThinkingTokens, tools, signal, options)
+  // Get client
+  const anthropic = await getAnthropicClient(options?.model)
+  const startIncludingRetries = Date.now()
+  
+  try {
+    // Prepare messages for API
+    const messageParams = addCacheBreakpoints(messages)
+    
+    // Prepend system prompt for CLI identification
+    if (options?.prependCLISysprompt) {
+      const [firstSyspromptBlock] = splitSysPromptPrefix(systemPrompt)
+      logEvent('tengu_sysprompt_block', {
+        snippet: firstSyspromptBlock?.slice(0, 20),
+        length: String(firstSyspromptBlock?.length ?? 0),
+        hash: firstSyspromptBlock
+          ? createHash('sha256').update(firstSyspromptBlock).digest('hex')
+          : '',
+      })
+      systemPrompt = [getCLISyspromptPrefix(), ...systemPrompt]
+    }
+    
+    // Format the system prompt
+    const systemPromptStr = systemPrompt.join('\n\n')
+    
+    // Convert tool schemas
+    const toolSchemas = await Promise.all(
+      tools.map(async tool => ({
+        name: tool.name,
+        description: await tool.prompt({
+          dangerouslySkipPermissions: options?.dangerouslySkipPermissions,
+        }),
+        input_schema: ('inputJSONSchema' in tool && tool.inputJSONSchema
+          ? tool.inputJSONSchema
+          : zodToJsonSchema(tool.inputSchema)),
+      }))
+    )
+    
+    let start = Date.now()
+    let attemptNumber = 0
+    let response
+    
+    // Call the API with retry handling
+    response = await withRetry(async attempt => {
+      attemptNumber = attempt
+      start = Date.now()
+      
+      // Log API call details
+      const modelToUse = options?.model || 'claude-3-sonnet-20240229'
+      console.log(`🔄 API Call: Anthropic | Model: ${modelToUse} | Endpoint: ${anthropic.baseURL || 'https://api.anthropic.com/v1'}/messages`)
+      
+      const apiResponse = await anthropic.messages.create({
+        model: modelToUse,
+        messages: messageParams,
+        system: systemPromptStr,
+        max_tokens: 4000,
+        temperature: MAIN_QUERY_TEMPERATURE,
+        metadata: getMetadata(),
+        tools: toolSchemas.length > 0 ? toolSchemas : undefined,
+      }, {
+        signal
+      })
+      
+      return apiResponse
+    })
+    
+    // Calculate response timing and token usage
+    const durationMs = Date.now() - start
+    const durationMsIncludingRetries = Date.now() - startIncludingRetries
+    
+    const inputTokens = response.usage?.input_tokens ?? 0
+    const outputTokens = response.usage?.output_tokens ?? 0
+    const cacheReadInputTokens = response.usage?.cache_read_input_tokens ?? 0
+    const cacheCreationInputTokens = response.usage?.cache_creation_input_tokens ?? 0
+    
+    // Calculate cost
+    const costUSD =
+      (inputTokens / 1_000_000) * SONNET_COST_PER_MILLION_INPUT_TOKENS +
+      (outputTokens / 1_000_000) * SONNET_COST_PER_MILLION_OUTPUT_TOKENS +
+      (cacheReadInputTokens / 1_000_000) *
+        SONNET_COST_PER_MILLION_PROMPT_CACHE_READ_TOKENS +
+      (cacheCreationInputTokens / 1_000_000) *
+        SONNET_COST_PER_MILLION_PROMPT_CACHE_WRITE_TOKENS
+    
+    // Track costs
+    addToTotalCost(costUSD, durationMsIncludingRetries)
+    
+    // Return formatted response with safer content handling and debugging
+    try {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Raw response content:', JSON.stringify(response?.content));
+        console.log('Response structure:', Object.keys(response || {}));
+      }
+      
+      const normalizedContent = normalizeContentFromAPI(response?.content);
+      
+      return {
+        message: {
+          id: response?.id || randomUUID(),
+          model: response?.model || '<unknown>',
+          role: 'assistant',
+          stop_reason: response?.stop_reason || 'stop_sequence',
+          stop_sequence: response?.stop_sequence || '',
+          type: 'message',
+          content: normalizedContent,
+          usage: {
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cache_read_input_tokens: cacheReadInputTokens,
+            cache_creation_input_tokens: cacheCreationInputTokens
+          },
+        },
+        costUSD,
+        durationMs,
+        type: 'assistant',
+        uuid: randomUUID(),
+      }
+    } catch (error) {
+      console.error('Error formatting response:', error);
+      return createAssistantAPIErrorMessage('Error processing response');
+    }
+  } catch (error) {
+    // Handle errors
+    logError(error)
+    return getAssistantMessageFromError(error)
+  }
 }
 
 function getAssistantMessageFromError(error: unknown): AssistantMessage {
@@ -703,7 +859,7 @@ function addCacheBreakpoints(
   })
 }
 
-async function queryOpenAI(
+export async function queryOpenAI(
   modelType: 'large' | 'small',
   messages: (UserMessage | AssistantMessage)[],
   systemPrompt: string[],
@@ -833,62 +989,164 @@ async function queryOpenAI(
 
   addToTotalCost(costUSD, durationMsIncludingRetries)
 
-  return {
-    message: {
-      ...response,
-      content: normalizeContentFromAPI(response.content),
-      usage: {
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
-        cache_read_input_tokens: cacheReadInputTokens,
-        cache_creation_input_tokens: 0
+  try {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('OpenAI raw response content:', JSON.stringify(response?.content));
+      console.log('OpenAI response structure:', Object.keys(response || {}));
+    }
+    
+    const normalizedContent = normalizeContentFromAPI(response.content);
+    
+    return {
+      message: {
+        id: response?.id || randomUUID(),
+        model: response?.model || '<unknown>',
+        role: 'assistant',
+        stop_reason: response?.stop_reason || response?.choices?.[0]?.finish_reason || 'stop_sequence',
+        stop_sequence: response?.stop_sequence || '',
+        type: 'message',
+        content: normalizedContent,
+        usage: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cache_read_input_tokens: cacheReadInputTokens,
+          cache_creation_input_tokens: 0
+        },
       },
-    },
-    costUSD,
-    durationMs,
-    type: 'assistant',
-    uuid: randomUUID(),
+      costUSD,
+      durationMs,
+      type: 'assistant',
+      uuid: randomUUID(),
+    }
+  } catch (error) {
+    console.error('Error formatting OpenAI response:', error);
+    return createAssistantAPIErrorMessage('Error processing OpenAI response');
   }
 }
 
 export async function queryHaiku({
+  apiKey = null,
   systemPrompt = [],
   userPrompt,
   assistantPrompt,
   enablePromptCaching = false,
+  maxTokens = 1000,
   signal,
 }: {
+  apiKey?: string | null
   systemPrompt: string[]
   userPrompt: string
   assistantPrompt?: string
   enablePromptCaching?: boolean
+  maxTokens?: number
   signal?: AbortSignal
 }): Promise<AssistantMessage> {
+  // Override Anthropic API key if provided
+  if (apiKey) {
+    process.env.ANTHROPIC_API_KEY = apiKey;
+  }
+  
+  // Get Anthropic client
+  const anthropic = await getAnthropicClient('claude-3-5-haiku-20241022')
+  const startIncludingRetries = Date.now()
+  
+  // Create formatted messages for VCR recording/playback
+  const recordedMessages = [
+    {
+      message: {
+        role: 'user',
+        content: systemPrompt.map(text => ({ type: 'text', text })),
+      },
+      type: 'user',
+      uuid: randomUUID(),
+    },
+    {
+      message: { role: 'user', content: userPrompt },
+      type: 'user',
+      uuid: randomUUID(),
+    },
+  ]
+  
   return await withVCR(
-    [
-      {
-        message: {
+    recordedMessages,
+    async () => {
+      try {
+        // Format system prompt
+        const systemPromptStr = systemPrompt.join('\n\n')
+        
+        // Prepare message for API
+        const messages = [{
           role: 'user',
-          content: systemPrompt.map(text => ({ type: 'text', text })),
-        },
-        type: 'user',
-        uuid: randomUUID(),
-      },
-      {
-        message: { role: 'user', content: userPrompt },
-        type: 'user',
-        uuid: randomUUID(),
-      },
-    ],
-    () => {
-      const messages = [
-        {
-          message: { role: 'user', content: userPrompt },
-          type: 'user',
+          content: userPrompt,
+        }]
+        
+        let start = Date.now()
+        let response
+        
+        // Call the API with retry handling
+        response = await withRetry(async attempt => {
+          start = Date.now()
+          
+          // Log API call details for Haiku
+          console.log(`🔄 API Call: Anthropic | Model: claude-3-5-haiku-20241022 | Endpoint: ${anthropic.baseURL || 'https://api.anthropic.com/v1'}/messages`)
+          
+          const apiResponse = await anthropic.messages.create({
+            model: 'claude-3-5-haiku-20241022',
+            messages: messages,
+            system: systemPromptStr,
+            max_tokens: maxTokens,
+            temperature: MAIN_QUERY_TEMPERATURE,
+            metadata: getMetadata(),
+          }, {
+            signal
+          })
+          
+          return apiResponse
+        })
+        
+        // Calculate response timing and token usage
+        const durationMs = Date.now() - start
+        const durationMsIncludingRetries = Date.now() - startIncludingRetries
+        
+        const inputTokens = response.usage?.input_tokens ?? 0
+        const outputTokens = response.usage?.output_tokens ?? 0
+        const cacheReadInputTokens = response.usage?.cache_read_input_tokens ?? 0
+        const cacheCreationInputTokens = response.usage?.cache_creation_input_tokens ?? 0
+        
+        // Calculate cost for Haiku
+        const costUSD =
+          (inputTokens / 1_000_000) * HAIKU_COST_PER_MILLION_INPUT_TOKENS +
+          (outputTokens / 1_000_000) * HAIKU_COST_PER_MILLION_OUTPUT_TOKENS +
+          (cacheReadInputTokens / 1_000_000) *
+            HAIKU_COST_PER_MILLION_PROMPT_CACHE_READ_TOKENS +
+          (cacheCreationInputTokens / 1_000_000) *
+            HAIKU_COST_PER_MILLION_PROMPT_CACHE_WRITE_TOKENS
+        
+        // Track costs
+        addToTotalCost(costUSD, durationMsIncludingRetries)
+        
+        // Return formatted response with safer content handling
+        return {
+          message: {
+            role: 'assistant',
+            content: normalizeContentFromAPI(response?.content),
+            usage: {
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+              cache_read_input_tokens: cacheReadInputTokens,
+              cache_creation_input_tokens: cacheCreationInputTokens
+            },
+          },
+          costUSD,
+          durationMs,
+          type: 'assistant',
           uuid: randomUUID(),
         }
-      ] as (UserMessage | AssistantMessage)[]
-      return queryOpenAI('small', messages, systemPrompt, 0, [], signal)      
+      } catch (error) {
+        // Handle errors
+        logError(error)
+        return getAssistantMessageFromError(error)
+      }
     },
   )
 }
