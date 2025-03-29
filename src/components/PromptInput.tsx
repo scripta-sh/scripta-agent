@@ -100,11 +100,11 @@ function PromptInput({
   const [cursorOffset, setCursorOffset] = useState<number>(input.length)
   const [pastedText, setPastedText] = useState<string | null>(null)
 
-  useEffect(() => {
-    getExampleCommands().then(commands => {
-      setPlaceholder(`Try "${sample(commands)}"`)
-    })
-  }, [])
+  // useEffect(() => {
+  //   getExampleCommands().then(commands => {
+  //     setPlaceholder(`Try "${sample(commands)}"`)
+  //   })
+  // }, [])
   const { columns } = useTerminalSize()
 
   const commandWidth = useMemo(

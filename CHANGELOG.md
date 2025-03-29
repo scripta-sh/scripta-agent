@@ -1,5 +1,32 @@
 # Changelog
 
+## [v0.0.48]
+- reset null reasoning effort if model doesn't support it
+
+## [v0.0.47]
+- more null checks
+
+## [v0.0.46]
+- null check for no api keys required
+
+## [v0.0.45]
+- make apiKeys be an array and use them round robin [#75](https://github.com/dnakov/anon-kode/issues/75)
+- fix config corruption
+- remove the unnecessary logStartup calls
+- remove the unnecessary LLM calls on start up just for the placeholder commands  
+
+## [v0.0.44] (unpublished)
+- make apiKeys be an array and use them round robin [#75](https://github.com/dnakov/anon-kode/issues/75)
+
+## [v0.0.43]
+- @monotykamary [#72](https://github.com/dnakov/anon-kode/pull/72) and [#73](https://github.com/dnakov/anon-kode/pull/73)
+
+## [v0.0.42]
+- handle google 429s that come in as 200.
+
+## [v0.0.41]
+- @zelenkovsky [#69](https://github.com/dnakov/anon-kode/pull/69) and [#70](https://github.com/dnakov/anon-kode/pull/70)
+
 ## [v0.0.40]
 - @jeanrobatto settings for optional api keys for like ollama
 

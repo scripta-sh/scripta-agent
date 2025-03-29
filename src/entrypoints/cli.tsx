@@ -45,7 +45,7 @@ import { LogList } from '../screens/LogList'
 import { ResumeConversation } from '../screens/ResumeConversation'
 import { startMCPServer } from './mcp'
 import { env } from '../utils/env'
-import { getCwd, setCwd } from '../utils/state'
+import { getCwd, setCwd, setOriginalCwd } from '../utils/state'
 import { omit } from 'lodash-es'
 import { getCommands } from '../commands'
 import { getNextAvailableLogForkNumber, loadLogList } from '../utils/log'
@@ -178,8 +178,11 @@ async function setup(
   cwd: string,
   dangerouslySkipPermissions?: boolean,
 ): Promise<void> {
-  // Don't await so we don't block startup
-  setCwd(cwd)
+  // Set both current and original working directory if --cwd was provided
+  if (cwd !== process.cwd()) {
+    setOriginalCwd(cwd)
+  }
+  await setCwd(cwd)
 
   // Always grant read permissions for original working dir
   grantReadPermissionForOriginalDir()
@@ -217,7 +220,7 @@ async function setup(
   }
 
   cleanupOldMessageFilesInBackground()
-  getExampleCommands() // Pre-fetch example commands
+  // getExampleCommands() // Pre-fetch example commands
   getContext() // Pre-fetch all context data at once
   // initializeStatsig() // Kick off statsig initialization
 
@@ -249,13 +252,13 @@ async function setup(
       last_session_id: projectConfig.lastSessionId,
     })
     // Clear the values after logging
-    saveCurrentProjectConfig({
-      ...projectConfig,
-      lastCost: undefined,
-      lastAPIDuration: undefined,
-      lastDuration: undefined,
-      lastSessionId: undefined,
-    })
+    // saveCurrentProjectConfig({
+    //   ...projectConfig,
+    //   lastCost: undefined,
+    //   lastAPIDuration: undefined,
+    //   lastDuration: undefined,
+    //   lastSessionId: undefined,
+    // })
   }
 
   // Check auto-updater permissions
@@ -386,7 +389,7 @@ ${commandList}`,
           ),
           getClients(),
         ])
-        logStartup()
+        // logStartup()
         const inputPrompt = [prompt, stdinContent].filter(Boolean).join('\n')
         if (print) {
           if (!inputPrompt) {
@@ -584,8 +587,8 @@ ${commandList}`,
   }
 
   mcp
-    .command('add <name> <command> [args...]')
-    .description('Add a stdio server')
+    .command('add [name] [commandOrUrl] [args...]')
+    .description('Add a server (run without arguments for interactive wizard)')
     .option(
       '-s, --scope <scope>',
       'Configuration scope (project or global)',
@@ -595,25 +598,109 @@ ${commandList}`,
       '-e, --env <env...>',
       'Set environment variables (e.g. -e KEY=value)',
     )
-    .action(async (name, command, args, options) => {
+    .action(async (name, commandOrUrl, args, options) => {
       try {
-        const scope = ensureConfigScope(options.scope)
-        logEvent('tengu_mcp_add', { name, type: 'stdio', scope })
+        // If name is not provided, start interactive wizard
+        if (!name) {
+          console.log("Interactive wizard mode: Enter the server details")
+          const { createInterface } = await import('readline');
+          const rl = createInterface({
+            input: process.stdin,
+            output: process.stdout
+          });
 
-        const env = parseEnvVars(options.env)
-        addMcpServer(
-          name,
-          { type: 'stdio', command, args: args || [], env },
-          scope,
-        )
+          const question = (query: string) => new Promise<string>(resolve => rl.question(query, resolve));
 
-        console.log(
-          `Added stdio MCP server ${name} with command: ${command} ${(args || []).join(' ')} to ${scope} config`,
-        )
-        process.exit(0)
+          // Get server name
+          const serverName = await question('Server name: ');
+          if (!serverName) {
+            console.error('Error: Server name is required');
+            rl.close();
+            process.exit(1);
+          }
+
+          // Get server type
+          const serverType = await question('Server type (stdio or sse) [stdio]: ');
+          const type = serverType && ['stdio', 'sse'].includes(serverType) ? serverType : 'stdio';
+
+          // Get command or URL
+          const prompt = type === 'stdio' ? 'Command: ' : 'URL: ';
+          const commandOrUrlValue = await question(prompt);
+          if (!commandOrUrlValue) {
+            console.error(`Error: ${type === 'stdio' ? 'Command' : 'URL'} is required`);
+            rl.close();
+            process.exit(1);
+          }
+
+          // Get args and env if stdio
+          let serverArgs: string[] = [];
+          let serverEnv: Record<string, string> = {};
+
+          if (type === 'stdio') {
+            const argsStr = await question('Command arguments (space-separated): ');
+            serverArgs = argsStr ? argsStr.split(' ').filter(Boolean) : [];
+
+            const envStr = await question('Environment variables (format: KEY1=value1,KEY2=value2): ');
+            if (envStr) {
+              const envPairs = envStr.split(',').map(pair => pair.trim());
+              serverEnv = parseEnvVars(envPairs.map(pair => pair));
+            }
+          }
+
+          // Get scope
+          const scopeStr = await question('Configuration scope (project or global) [project]: ');
+          const serverScope = ensureConfigScope(scopeStr || 'project');
+
+          rl.close();
+
+          // Add the server
+          if (type === 'sse') {
+            logEvent('tengu_mcp_add', { name: serverName, type: 'sse', scope: serverScope });
+            addMcpServer(serverName, { type: 'sse', url: commandOrUrlValue }, serverScope);
+            console.log(`Added SSE MCP server ${serverName} with URL ${commandOrUrlValue} to ${serverScope} config`);
+          } else {
+            logEvent('tengu_mcp_add', { name: serverName, type: 'stdio', scope: serverScope });
+            addMcpServer(
+              serverName,
+              { type: 'stdio', command: commandOrUrlValue, args: serverArgs, env: serverEnv },
+              serverScope
+            );
+
+            console.log(
+              `Added stdio MCP server ${serverName} with command: ${commandOrUrlValue} ${serverArgs.join(' ')} to ${serverScope} config`
+            );
+          }
+        } else if (name && commandOrUrl) {
+          // Regular non-interactive flow
+          const scope = ensureConfigScope(options.scope);
+
+          // Check if it's an SSE URL (starts with http:// or https://)
+          if (commandOrUrl.match(/^https?:\/\//)) {
+            logEvent('tengu_mcp_add', { name, type: 'sse', scope });
+            addMcpServer(name, { type: 'sse', url: commandOrUrl }, scope);
+            console.log(`Added SSE MCP server ${name} with URL ${commandOrUrl} to ${scope} config`);
+          } else {
+            logEvent('tengu_mcp_add', { name, type: 'stdio', scope });
+            const env = parseEnvVars(options.env);
+            addMcpServer(
+              name,
+              { type: 'stdio', command: commandOrUrl, args: args || [], env },
+              scope
+            );
+
+            console.log(
+              `Added stdio MCP server ${name} with command: ${commandOrUrl} ${(args || []).join(' ')} to ${scope} config`
+            );
+          }
+        } else {
+          console.error('Error: Missing required arguments. Either provide no arguments for interactive mode or specify name and command/URL.');
+          process.exit(1);
+        }
+
+        process.exit(0);
       } catch (error) {
-        console.error((error as Error).message)
-        process.exit(1)
+        console.error((error as Error).message);
+        process.exit(1);
       }
     })
   mcp
@@ -661,6 +748,64 @@ ${commandList}`,
     })
 
   mcp
+    .command('add-json <name> <json>')
+    .description('Add an MCP server (stdio or SSE) with a JSON string')
+    .option(
+      '-s, --scope <scope>',
+      'Configuration scope (project or global)',
+      'project',
+    )
+    .action(async (name, jsonStr, options) => {
+      try {
+        const scope = ensureConfigScope(options.scope);
+
+        // Parse JSON string
+        let serverConfig;
+        try {
+          serverConfig = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error('Error: Invalid JSON string');
+          process.exit(1);
+        }
+
+        // Validate the server config
+        if (!serverConfig.type || !['stdio', 'sse'].includes(serverConfig.type)) {
+          console.error('Error: Server type must be "stdio" or "sse"');
+          process.exit(1);
+        }
+
+        if (serverConfig.type === 'sse' && !serverConfig.url) {
+          console.error('Error: SSE server must have a URL');
+          process.exit(1);
+        }
+
+        if (serverConfig.type === 'stdio' && !serverConfig.command) {
+          console.error('Error: stdio server must have a command');
+          process.exit(1);
+        }
+
+        // Add server with the provided config
+        logEvent('tengu_mcp_add_json', { name, type: serverConfig.type, scope });
+        addMcpServer(name, serverConfig, scope);
+
+        if (serverConfig.type === 'sse') {
+          console.log(`Added SSE MCP server ${name} with URL ${serverConfig.url} to ${scope} config`);
+        } else {
+          console.log(
+            `Added stdio MCP server ${name} with command: ${serverConfig.command} ${
+              (serverConfig.args || []).join(' ')
+            } to ${scope} config`
+          );
+        }
+
+        process.exit(0);
+      } catch (error) {
+        console.error((error as Error).message);
+        process.exit(1);
+      }
+    })
+
+  mcp
     .command('get <name>')
     .description('Get details about an MCP server')
     .action((name: string) => {
@@ -689,6 +834,294 @@ ${commandList}`,
       process.exit(0)
     })
 
+  // Import servers from Claude Desktop
+  mcp
+    .command('add-from-claude-desktop')
+    .description('Import MCP servers from Claude Desktop (Mac, Windows and WSL)')
+    .option(
+      '-s, --scope <scope>',
+      'Configuration scope (project or global)',
+      'project',
+    )
+    .action(async (options) => {
+      try {
+        const scope = ensureConfigScope(options.scope);
+        const platform = process.platform;
+
+        // Import fs and path modules
+        const { existsSync, readFileSync } = await import('fs');
+        const { join } = await import('path');
+        const { exec } = await import('child_process');
+
+        // Determine if running in WSL
+        const isWSL = (platform === 'linux' &&
+          existsSync('/proc/version') &&
+          readFileSync('/proc/version', 'utf-8').toLowerCase().includes('microsoft'));
+
+        if (platform !== 'darwin' && platform !== 'win32' && !isWSL) {
+          console.error('Error: This command is only supported on macOS, Windows, and WSL');
+          process.exit(1);
+        }
+
+        // Get Claude Desktop config path
+        let configPath;
+        if (platform === 'darwin') {
+          configPath = join(
+            process.env.HOME || '~',
+            'Library/Application Support/Claude/claude_desktop_config.json'
+          );
+        } else if (platform === 'win32') {
+          configPath = join(
+            process.env.APPDATA || '',
+            'Claude/claude_desktop_config.json'
+          );
+        } else if (isWSL) {
+          // Get Windows username
+          const whoamiCommand = await new Promise<string>((resolve, reject) => {
+            exec('powershell.exe -Command "whoami"', (err: Error, stdout: string) => {
+              if (err) reject(err);
+              else resolve(stdout.trim().split('\\').pop() || '');
+            });
+          });
+
+          configPath = `/mnt/c/Users/${whoamiCommand}/AppData/Roaming/Claude/claude_desktop_config.json`;
+        }
+
+        // Check if config file exists
+        if (!existsSync(configPath)) {
+          console.error(`Error: Claude Desktop config file not found at ${configPath}`);
+          process.exit(1);
+        }
+
+        // Read config file
+        let config;
+        try {
+          const configContent = readFileSync(configPath, 'utf-8');
+          config = JSON.parse(configContent);
+        } catch (err) {
+          console.error(`Error reading config file: ${err}`);
+          process.exit(1);
+        }
+
+        // Extract MCP servers
+        const mcpServers = config.mcpServers || {};
+        const serverNames = Object.keys(mcpServers);
+        const numServers = serverNames.length;
+
+        if (numServers === 0) {
+          console.log('No MCP servers found in Claude Desktop config');
+          process.exit(0);
+        }
+
+        // Create server information for display
+        const serversInfo = serverNames.map(name => {
+          const server = mcpServers[name];
+          let description = '';
+
+          if (server.type === 'sse') {
+            description = `SSE: ${server.url}`;
+          } else {
+            description = `stdio: ${server.command} ${(server.args || []).join(' ')}`;
+          }
+
+          return { name, description, server };
+        });
+
+        // First import all required modules outside the component
+        // Import modules separately to avoid any issues
+        const ink = await import('ink');
+        const reactModule = await import('react');
+        const inkjsui = await import('@inkjs/ui');
+        const utilsTheme = await import('../utils/theme');
+
+        const { render } = ink;
+        const React = reactModule;  // React is already the default export when imported this way
+        const { MultiSelect } = inkjsui;
+        const { Box, Text } = ink;
+        const { getTheme } = utilsTheme;
+
+        // Use Ink to render a nice UI for selection
+        await new Promise<void>((resolve) => {
+          // Create a component for the server selection
+          function ClaudeDesktopImport() {
+            const { useState } = reactModule;
+            const [isFinished, setIsFinished] = useState(false);
+            const [importResults, setImportResults] = useState<{name: string, success: boolean}[]>([]);
+            const [isImporting, setIsImporting] = useState(false);
+            const theme = getTheme();
+
+            // Function to import selected servers
+            const importServers = async (selectedServers: string[]) => {
+              setIsImporting(true);
+              const results = [];
+
+              for (const name of selectedServers) {
+                try {
+                  const server = mcpServers[name];
+
+                  // Check if server already exists
+                  const existingServer = getMcpServer(name);
+                  if (existingServer) {
+                    // Skip duplicates - we'll handle them in the confirmation step
+                    continue;
+                  }
+
+                  addMcpServer(name, server as McpServerConfig, scope);
+                  results.push({ name, success: true });
+                } catch (err) {
+                  results.push({ name, success: false });
+                }
+              }
+
+              setImportResults(results);
+              setIsImporting(false);
+              setIsFinished(true);
+
+              // Give time to show results
+              setTimeout(() => {
+                resolve();
+              }, 1000);
+            };
+
+            // Handle confirmation of selections
+            const handleConfirm = async (selectedServers: string[]) => {
+              // Check for existing servers and confirm overwrite
+              const existingServers = selectedServers.filter(name => getMcpServer(name));
+
+              if (existingServers.length > 0) {
+                // We'll just handle it directly since we have a simple UI
+                const results = [];
+
+                // Process non-existing servers first
+                const newServers = selectedServers.filter(name => !getMcpServer(name));
+                for (const name of newServers) {
+                  try {
+                    const server = mcpServers[name];
+                    addMcpServer(name, server as McpServerConfig, scope);
+                    results.push({ name, success: true });
+                  } catch (err) {
+                    results.push({ name, success: false });
+                  }
+                }
+
+                // Now handle existing servers by prompting for each one
+                for (const name of existingServers) {
+                  try {
+                    const server = mcpServers[name];
+                    // Overwrite existing server - in a real interactive UI you'd prompt here
+                    addMcpServer(name, server as McpServerConfig, scope);
+                    results.push({ name, success: true });
+                  } catch (err) {
+                    results.push({ name, success: false });
+                  }
+                }
+
+                setImportResults(results);
+                setIsImporting(false);
+                setIsFinished(true);
+
+                // Give time to show results before resolving
+                setTimeout(() => {
+                  resolve();
+                }, 1000);
+              } else {
+                // No existing servers, proceed with import
+                await importServers(selectedServers);
+              }
+            };
+
+            return (
+              <Box flexDirection="column" padding={1}>
+                <Box
+                  flexDirection="column"
+                  borderStyle="round"
+                  borderColor={theme.claude}
+                  padding={1}
+                  width={"100%"}
+                >
+                  <Text bold color={theme.claude}>
+                    Import MCP Servers from Claude Desktop
+                  </Text>
+
+                  <Box marginY={1}>
+                    <Text>
+                      Found {numServers} MCP servers in Claude Desktop.
+                    </Text>
+                  </Box>
+
+                  <Text>Please select the servers you want to import:</Text>
+
+                  <Box marginTop={1}>
+                    <MultiSelect
+                      options={serverNames.map(name => ({
+                        label: name,
+                        value: name,
+                      }))}
+                      defaultValue={serverNames}
+                      onSubmit={handleConfirm}
+                    />
+                  </Box>
+                </Box>
+
+                <Box marginTop={0} marginLeft={3}>
+                  <Text dimColor>Space to select · Enter to confirm · Esc to cancel</Text>
+                </Box>
+
+                {isFinished && (
+                  <Box marginTop={1}>
+                    <Text color={theme.success}>
+                      Successfully imported {importResults.filter(r => r.success).length} MCP server to local config.
+                    </Text>
+                  </Box>
+                )}
+              </Box>
+            );
+          }
+
+          // Render the component
+          const { unmount } = render(<ClaudeDesktopImport />);
+
+          // Clean up when done
+          setTimeout(() => {
+            unmount();
+            resolve();
+          }, 30000); // Timeout after 30 seconds as a fallback
+        });
+
+        process.exit(0);
+      } catch (error) {
+        console.error(`Error: ${(error as Error).message}`);
+        process.exit(1);
+      }
+    })
+
+  // Function to reset MCP server choices
+  const resetMcpChoices = () => {
+    const config = getCurrentProjectConfig();
+    saveCurrentProjectConfig({
+      ...config,
+      approvedMcprcServers: [],
+      rejectedMcprcServers: [],
+    });
+    console.log(
+      'All .mcprc server approvals and rejections have been reset.',
+    );
+    console.log(
+      `You will be prompted for approval next time you start ${PRODUCT_NAME}.`,
+    );
+    process.exit(0);
+  };
+
+  // New command name to match Claude Code
+  mcp
+    .command('reset-project-choices')
+    .description('Reset all approved and rejected project-scoped (.mcp.json) servers within this project')
+    .action(() => {
+      logEvent('tengu_mcp_reset_project_choices', {});
+      resetMcpChoices();
+    });
+
+  // Keep old command for backward compatibility (visible only to ants)
   if (process.env.USER_TYPE === 'ant') {
     mcp
       .command('reset-mcprc-choices')
@@ -696,20 +1129,8 @@ ${commandList}`,
         'Reset all approved and rejected .mcprc servers for this project',
       )
       .action(() => {
-        logEvent('tengu_mcp_reset_mcprc_choices', {})
-        const config = getCurrentProjectConfig()
-        saveCurrentProjectConfig({
-          ...config,
-          approvedMcprcServers: [],
-          rejectedMcprcServers: [],
-        })
-        console.log(
-          'All .mcprc server approvals and rejections have been reset.',
-        )
-        console.log(
-          `You will be prompted for approval next time you start ${PRODUCT_NAME}.`,
-        )
-        process.exit(0)
+        logEvent('tengu_mcp_reset_mcprc_choices', {});
+        resetMcpChoices();
       })
   }
 
@@ -845,7 +1266,7 @@ ${commandList}`,
             loadLogList(CACHE_PATHS.messages()),
             getClients(),
           ])
-          logStartup()
+          // logStartup()
 
           // If a specific conversation is requested, load and resume it directly
           if (identifier !== undefined) {

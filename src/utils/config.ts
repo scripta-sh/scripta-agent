@@ -10,6 +10,7 @@ import { checkGate, logEvent } from '../services/statsig'
 import { GATE_USE_EXTERNAL_UPDATER } from '../constants/betas'
 import { ConfigParseError } from './errors'
 import type { ThemeNames } from './theme'
+import { getSessionState, setSessionState } from './sessionState'
 
 export type McpStdioServerConfig = {
   type?: 'stdio' // Optional for backwards compatibility
@@ -125,12 +126,14 @@ export type GlobalConfig = {
   largeModelBaseURL?: string
   largeModelName?: string
   largeModelApiKeyRequired?: boolean 
-  largeModelApiKey?: string
+  largeModelApiKeys?: string[]
+  largeModelApiKey?: string // Deprecated
   largeModelReasoningEffort?: 'low' | 'medium' | 'high' | undefined
   smallModelBaseURL?: string
   smallModelName?: string
   smallModelApiKeyRequired?: boolean 
-  smallModelApiKey?: string 
+  smallModelApiKeys?: string[]
+  smallModelApiKey?: string // Deprecated
   smallModelReasoningEffort?: 'low' | 'medium' | 'high' | undefined
   smallModelMaxTokens?: number
   largeModelMaxTokens?: number
@@ -221,9 +224,18 @@ export function isProjectConfigKey(key: string): key is ProjectConfigKey {
 }
 
 export function saveGlobalConfig(config: GlobalConfig): void {
+
+  if(config.largeModelApiKey && !config.largeModelApiKeys) {
+    config.largeModelApiKeys = [config.largeModelApiKey]
+    delete config.largeModelApiKey
+  }
+  if(config.smallModelApiKey && !config.smallModelApiKeys) {
+    config.smallModelApiKeys = [config.smallModelApiKey]
+    delete config.smallModelApiKey
+  }
+
   if (process.env.NODE_ENV === 'test') {
     for (const key in config) {
-      // @ts-expect-error: TODO
       TEST_GLOBAL_CONFIG_FOR_TESTING[key] = config[key]
     }
     return
@@ -347,6 +359,20 @@ function getConfig<A>(
     const fileContent = readFileSync(file, 'utf-8')
     try {
       const parsedConfig = JSON.parse(fileContent)
+      
+      // Handle backward compatibility for API keys
+      if ('smallModelApiKey' in parsedConfig && !parsedConfig.smallModelApiKeys) {
+        parsedConfig.smallModelApiKeys = parsedConfig.smallModelApiKey ? [parsedConfig.smallModelApiKey] : []
+        delete parsedConfig.smallModelApiKey
+      }
+      if ('largeModelApiKey' in parsedConfig && !parsedConfig.largeModelApiKeys) {
+        parsedConfig.largeModelApiKeys = parsedConfig.largeModelApiKey ? [parsedConfig.largeModelApiKey] : []
+        delete parsedConfig.largeModelApiKey
+      }
+
+      parsedConfig.smallModelApiKeys = parsedConfig.smallModelApiKeys?.filter(key => key !== '') || []
+      parsedConfig.largeModelApiKeys = parsedConfig.largeModelApiKeys?.filter(key => key !== '') || []
+
       return {
         ...cloneDeep(defaultConfig),
         ...parsedConfig,
@@ -392,7 +418,6 @@ export function getCurrentProjectConfig(): ProjectConfig {
 export function saveCurrentProjectConfig(projectConfig: ProjectConfig): void {
   if (process.env.NODE_ENV === 'test') {
     for (const key in projectConfig) {
-      // @ts-expect-error: TODO
       TEST_PROJECT_CONFIG_FOR_TESTING[key] = projectConfig[key]
     }
     return
@@ -615,4 +640,70 @@ export function listConfigForCLI(global: boolean): object {
 
 export function getOpenAIApiKey(): string | undefined {
   return process.env.OPENAI_API_KEY
+}
+
+export function addApiKey(config: GlobalConfig, key: string, type: 'small' | 'large'): void {
+  const keyArray = type === 'small' ? 'smallModelApiKeys' : 'largeModelApiKeys'
+  if (!config[keyArray]) {
+    config[keyArray] = []
+  }
+  if (!config[keyArray]!.includes(key)) {
+    config[keyArray]!.push(key)
+  }
+}
+
+export function removeApiKey(config: GlobalConfig, key: string, type: 'small' | 'large'): void {
+  const keyArray = type === 'small' ? 'smallModelApiKeys' : 'largeModelApiKeys'
+  if (config[keyArray]) {
+    config[keyArray] = config[keyArray]!.filter(k => k !== key)
+  }
+}
+
+export function getApiKeys(config: GlobalConfig, type: 'small' | 'large'): string[] {
+  const keyArray = type === 'small' ? 'smallModelApiKeys' : 'largeModelApiKeys'
+  return config[keyArray] || []
+}
+
+// Add counter for round-robin key selection
+let currentKeyIndex = 0
+
+export function getActiveApiKey(config: GlobalConfig, type: 'small' | 'large', roundRobin: boolean = true): string | undefined {
+  let keyArray = type === 'small' ? config.smallModelApiKeys : config.largeModelApiKeys
+  if(!keyArray) {
+    keyArray = []
+  }
+  const failedKeys = getSessionState('failedApiKeys')[type]
+  keyArray = keyArray.filter(key => !failedKeys.includes(key)).filter(key => key && key !== '')
+  if (!keyArray || keyArray.length === 0) {
+    return undefined
+  }
+
+  // Get the current index from session state or start at 0
+  const currentIndex = getSessionState('currentApiKeyIndex')[type]
+  if(!roundRobin) {
+    return keyArray[currentIndex]
+  }
+
+  const nextIndex = (currentIndex + 1) % keyArray.length
+  // Store the next index for next time
+  setSessionState('currentApiKeyIndex', {
+    ...getSessionState('currentApiKeyIndex'),
+    [type]: nextIndex
+  })
+  return keyArray[nextIndex]
+}
+
+// Add a function to mark an API key as failed
+export function markApiKeyAsFailed(key: string, type: 'small' | 'large'): void {
+  const failedKeys = getSessionState('failedApiKeys')[type]
+  if (!failedKeys.includes(key)) {
+    setSessionState('failedApiKeys', {
+      ...getSessionState('failedApiKeys'),
+      [type]: [...failedKeys, key]
+    })
+    setSessionState('currentApiKeyIndex', {
+      ...getSessionState('currentApiKeyIndex'),
+      [type]: getSessionState('currentApiKeyIndex')[type] - 1
+    })
+  }
 }

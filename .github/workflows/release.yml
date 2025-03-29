@@ -67,16 +67,13 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Commit changes
+      - name: Commit changes and publish
         run: |
           git add package.json
-          git add cli.mjs
           git commit -m "Release v${{ steps.bump_version.outputs.new_version }}"
           git tag -a v${{ steps.bump_version.outputs.new_version }} -m "Release v${{ steps.bump_version.outputs.new_version }}"
           git push origin HEAD:main
           git push origin --tags
-
-      - name: Publish to npm
-        run: pnpm publish --no-git-checks
+          pnpm publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 

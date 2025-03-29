@@ -10,7 +10,7 @@ import 'dotenv/config'
 import { addToTotalCost } from '../cost-tracker'
 import type { AssistantMessage, UserMessage } from '../query'
 import { Tool } from '../Tool'
-import { getAnthropicApiKey, getOrCreateUserID, getGlobalConfig } from '../utils/config'
+import { getAnthropicApiKey, getOrCreateUserID, getGlobalConfig, getActiveApiKey, markApiKeyAsFailed } from '../utils/config'
 import { logError, SESSION_ID } from '../utils/log'
 import { USER_AGENT } from '../utils/http'
 import {
@@ -34,44 +34,8 @@ import OpenAI from 'openai'
 import type { ChatCompletionStream } from 'openai/lib/ChatCompletionStream'
 import { ContentBlock } from '@anthropic-ai/sdk/resources/messages/messages'
 import { nanoid } from 'nanoid'
-const openaiClients: Record<string, OpenAI> = {}
-import { HttpsProxyAgent } from 'https-proxy-agent';
 import { getCompletion } from './openai'
 import { getReasoningEffort } from 'utils/thinking'
-
-export function getOpenAIClient(type: 'large' | 'small'): OpenAI {
-
-  if (openaiClients[type]) {
-    return openaiClients[type]
-  }
-  const config = getGlobalConfig()
-  const apiKey = type === 'large' ? config.largeModelApiKey : config.smallModelApiKey
-  const apiKeyRequired = type === 'large' ? config.largeModelApiKeyRequired : config.smallModelApiKeyRequired;
-
-  if (apiKeyRequired && !apiKey) {
-    console.error(
-      chalk.red(
-        'Go to /config and set your API keys',
-      ),
-    )
-  }
-  try { 
-    openaiClients[type] = new OpenAI({
-      apiKey: apiKey || "", // Requires a string, but will be ignored if the API key is not needed
-      maxRetries: 0, // Disabled auto-retry in favor of manual implementation
-      timeout: parseInt(process.env.API_TIMEOUT_MS || String(60 * 1000), 10),
-      dangerouslyAllowBrowser: true,
-      baseURL: type === 'large' ? config.largeModelBaseURL : config.smallModelBaseURL,
-      httpAgent: config.proxy ? new HttpsProxyAgent(config.proxy) : undefined,
-    })
-  } catch (error) {
-    console.error(chalk.red('Error creating OpenAI client'), error)
-  }
-
-  return openaiClients[type]
-}
-
-// import { querySonnetWithPromptCaching as querySonnetWithPromptCaching2, queryHaikuWithPromptCaching as queryHaikuWithPromptCachingAnthropic2 } from './openai'
 
 
 interface StreamResponse extends APIMessage {
@@ -171,7 +135,6 @@ async function withRetry<T>(
       return await operation(attempt)
     } catch (error) {
       lastError = error
-
       // Only retry if the error indicates we should
       if (
         attempt > maxRetries ||
@@ -398,7 +361,20 @@ async function handleMessageStream(
 
 function convertOpenAIResponseToAnthropic(response: OpenAI.ChatCompletion) {
   let contentBlocks: ContentBlock[] = []
-  const message = response.choices[0].message
+  const message = response.choices?.[0]?.message
+  if(!message) {
+    logEvent('weird_response', {
+      response: JSON.stringify(response),
+    })
+    return {
+      role: 'assistant',
+      content: [],
+      stop_reason: response.choices?.[0]?.finish_reason,
+      type: 'message',
+      usage: response.usage,
+    }
+  }
+  
   if(message?.tool_calls) {
     for(const toolCall of message.tool_calls) {
       const tool = toolCall.function
@@ -449,7 +425,7 @@ function convertOpenAIResponseToAnthropic(response: OpenAI.ChatCompletion) {
   const finalMessage = {
     role: 'assistant',
     content: contentBlocks,
-    stop_reason: response.choices[0].finish_reason,
+    stop_reason: response.choices?.[0]?.finish_reason,
     type: 'message',
     usage: response.usage,
   }
@@ -742,7 +718,6 @@ async function queryOpenAI(
 ): Promise<AssistantMessage> {
 
   //const anthropic = await getAnthropicClient(options.model)
-  const openai = getOpenAIClient(modelType)
   const config = getGlobalConfig()
   const model = modelType === 'large' ? config.largeModelName : config.smallModelName
   // Prepend system prompt block for easy API identification
