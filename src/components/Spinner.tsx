@@ -20,7 +20,7 @@ const MESSAGES = [
   'Calculating',
   'Cerebrating',
   'Churning',
-  'Koding',
+  'Scripting',
   'Coalescing',
   'Cogitating',
   'Computing',

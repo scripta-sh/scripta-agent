@@ -504,7 +504,6 @@ export function createStreamProcessor(
         while (lineEnd !== -1) {
           const line = buffer.substring(0, lineEnd).trim()
           buffer = buffer.substring(lineEnd + 1)
-
           if (line === 'data: [DONE]') {
             continue
           }
