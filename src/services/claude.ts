@@ -438,7 +438,7 @@ let anthropicClient: Anthropic | null = null
 /**
  * Get the Anthropic client, creating it if it doesn't exist
  */
-export function getAnthropicClient(model?: string): Anthropic {
+export function getAnthropicClient(model?: string, customApiKey?: string): Anthropic {
   if (anthropicClient) {
     return anthropicClient
   }
@@ -474,7 +474,8 @@ export function getAnthropicClient(model?: string): Anthropic {
     return client
   }
 
-  const apiKey = getAnthropicApiKey()
+  // Use provided custom API key or fall back to configured key
+  const apiKey = customApiKey || getAnthropicApiKey()
 
   if (process.env.USER_TYPE === 'ant' && !apiKey) {
     console.error(
@@ -627,11 +628,6 @@ export async function queryAnthropicModel(
     console.log('querySonnet called with model:', options.model);
   }
   
-  // Override Anthropic API key if provided
-  if (apiKey) {
-    process.env.ANTHROPIC_API_KEY = apiKey;
-  }
-  
   // Use the configuration from utils/config for the provider
   const config = getGlobalConfig();
   const provider = config.primaryProvider;
@@ -662,6 +658,7 @@ export async function queryAnthropicModel(
         model: options.model || 'claude-3-7-sonnet-20250219',
         prependCLISysprompt: options.prependCLISysprompt || false,
       },
+      apiKey,
     ),
   );
 }
@@ -694,9 +691,11 @@ async function queryAnthropicModelWithPromptCaching(
     model: string
     prependCLISysprompt: boolean
   },
+  apiKey?: string,
 ): Promise<AssistantMessage> {
-  // Get client
-  const anthropic = await getAnthropicClient(options?.model)
+  // Get client with the provided API key if available
+  resetAnthropicClient() // Reset client to force creation of a new one with potentially different API key
+  const anthropic = await getAnthropicClient(options?.model, apiKey)
   const startIncludingRetries = Date.now()
   
   try {
@@ -1041,13 +1040,11 @@ export async function queryHaiku({
   maxTokens?: number
   signal?: AbortSignal
 }): Promise<AssistantMessage> {
-  // Override Anthropic API key if provided
-  if (apiKey) {
-    process.env.ANTHROPIC_API_KEY = apiKey;
-  }
+  // Reset client to ensure a fresh instance with the correct API key
+  resetAnthropicClient()
   
-  // Get Anthropic client
-  const anthropic = await getAnthropicClient('claude-3-5-haiku-20241022')
+  // Get Anthropic client with custom API key if provided
+  const anthropic = await getAnthropicClient('claude-3-5-haiku-20241022', apiKey || undefined)
   const startIncludingRetries = Date.now()
   
   // Create formatted messages for VCR recording/playback
