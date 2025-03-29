@@ -27,7 +27,7 @@ import type {
   MessageParam,
   TextBlockParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { SMALL_FAST_MODEL, USE_BEDROCK, USE_VERTEX } from '../utils/model'
+import { SMALL_FAST_MODEL, USE_BEDROCK, USE_VERTEX, getSmallModel } from '../utils/model'
 import { getCLISyspromptPrefix } from '../constants/prompts'
 import { getVertexRegionForModel } from '../utils/model'
 import OpenAI from 'openai'
@@ -179,7 +179,9 @@ export async function verifyApiKey(apiKey: string): Promise<boolean> {
   try {
     await withRetry(
       async () => {
-        const model = SMALL_FAST_MODEL
+        // Use the configured small model from the config
+        const config = getGlobalConfig()
+        const model = config.smallModelName || SMALL_FAST_MODEL
         const messages: MessageParam[] = [{ role: 'user', content: 'test' }]
         await anthropic.messages.create({
           model,
@@ -1040,11 +1042,59 @@ export async function queryHaiku({
   maxTokens?: number
   signal?: AbortSignal
 }): Promise<AssistantMessage> {
+  // Get the configured provider and model
+  const config = getGlobalConfig()
+  const provider = config.primaryProvider || 'anthropic'
+  const smallModel = config.smallModelName || SMALL_FAST_MODEL
+  
+  // For non-Anthropic providers, use the OpenAI-compatible interface
+  if (provider !== 'anthropic') {
+    try {
+      const response = await getCompletion('small', {
+        model: smallModel,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt.join('\n\n')
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        max_tokens: maxTokens,
+        temperature: MAIN_QUERY_TEMPERATURE
+      })
+      
+      const completion = convertOpenAIResponseToAnthropic(response as any)
+      
+      return {
+        message: {
+          role: 'assistant',
+          content: completion.content,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0
+          },
+        },
+        costUSD: 0,
+        durationMs: 0,
+        type: 'assistant',
+        uuid: randomUUID(),
+      }
+    } catch (error) {
+      return getAssistantMessageFromError(error)
+    }
+  }
+  
+  // For Anthropic provider, use the original implementation
   // Reset client to ensure a fresh instance with the correct API key
   resetAnthropicClient()
   
   // Get Anthropic client with custom API key if provided
-  const anthropic = await getAnthropicClient('claude-3-5-haiku-20241022', apiKey || undefined)
+  const anthropic = await getAnthropicClient(smallModel, apiKey || undefined)
   const startIncludingRetries = Date.now()
   
   // Create formatted messages for VCR recording/playback
@@ -1084,11 +1134,11 @@ export async function queryHaiku({
         response = await withRetry(async attempt => {
           start = Date.now()
           
-          // Log API call details for Haiku
-          console.log(`🔄 API Call: Anthropic | Model: claude-3-5-haiku-20241022 | Endpoint: ${anthropic.baseURL || 'https://api.anthropic.com/v1'}/messages`)
+          // Log API call details 
+          console.log(`🔄 API Call: ${config.primaryProvider} | Model: ${smallModel} | Endpoint: ${anthropic.baseURL || 'https://api.anthropic.com/v1'}/messages`)
           
           const apiResponse = await anthropic.messages.create({
-            model: 'claude-3-5-haiku-20241022',
+            model: smallModel,
             messages: messages,
             system: systemPromptStr,
             max_tokens: maxTokens,
