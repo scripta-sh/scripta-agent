@@ -1,13 +1,13 @@
 # Scripta Agent
-
-   _____  _____ _____  _____ _____ _______       
-  / ____|/ ____|  __ \|_   _|  __ \__   __|/\    
- | (___ | |    | |__) | | | | |__) | | |  /  \   
-  \___ \| |    |  _  /  | | |  ___/  | | / /\ \  
-  ____) | |____| | \ \ _| |_| |      | |/ ____ \ 
- |_____/ \_____|_|  \_\_____|_|      |_/_/    \_\
+```
+███████╗ ██████╗██████╗ ██╗██████╗ ████████╗ █████╗ 
+██╔════╝██╔════╝██╔══██╗██║██╔══██╗╚══██╔══╝██╔══██╗
+███████╗██║     ██████╔╝██║██████╔╝   ██║   ███████║
+╚════██║██║     ██╔══██╗██║██╔═══╝    ██║   ██╔══██║
+███████║╚██████╗██║  ██║██║██║        ██║   ██║  ██║
+╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   ╚═╝  ╚═╝
                                                 
-
+```
 Scripta Agent is an AI-driven, autonomous development agent designed to generate, review, debug, and push code with minimal human intervention. It acts as the backend engine for Scripta, a platform that accelerates software development by automating tedious engineering tasks.
 
 ## Key Features

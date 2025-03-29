@@ -181,3 +181,7 @@ yoga.wasm
 
 # Scripta configuration directories
 .scripta/
+
+docs/*
+.env.*
+CLAUDE.md
