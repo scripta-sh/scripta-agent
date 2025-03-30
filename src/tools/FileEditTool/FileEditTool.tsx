@@ -59,60 +59,6 @@ export const FileEditTool = {
   isReadOnly() {
     return false
   },
-  renderToolUseMessage(input, { verbose }) {
-    return `file_path: ${verbose ? input.file_path : relative(getCwd(), input.file_path)}`
-  },
-  renderToolResultMessage({ filePath, structuredPatch }, { verbose }) {
-    return (
-      <FileEditToolUpdatedMessage
-        filePath={filePath}
-        structuredPatch={structuredPatch}
-        verbose={verbose}
-      />
-    )
-  },
-  renderToolUseRejectedMessage(
-    { file_path, old_string, new_string },
-    { columns, verbose },
-  ) {
-    try {
-      const { patch } = applyEdit(file_path, old_string, new_string)
-      return (
-        <Box flexDirection="column">
-          <Text>
-            {'  '}⎿{' '}
-            <Text color={getTheme().error}>
-              User rejected {old_string === '' ? 'write' : 'update'} to{' '}
-            </Text>
-            <Text bold>
-              {verbose ? file_path : relative(getCwd(), file_path)}
-            </Text>
-          </Text>
-          {intersperse(
-            patch.map(patch => (
-              <Box flexDirection="column" paddingLeft={5} key={patch.newStart}>
-                <StructuredDiff patch={patch} dim={true} width={columns - 12} />
-              </Box>
-            )),
-            i => (
-              <Box paddingLeft={5} key={`ellipsis-${i}`}>
-                <Text color={getTheme().secondaryText}>...</Text>
-              </Box>
-            ),
-          )}
-        </Box>
-      )
-    } catch (e) {
-      // Handle the case where while we were showing the diff, the user manually made the change.
-      // TODO: Find a way to show the diff in this case
-      logError(e)
-      return (
-        <Box flexDirection="column">
-          <Text>{'  '}⎿ (No changes)</Text>
-        </Box>
-      )
-    }
-  },
   async validateInput(
     { file_path, old_string, new_string },
     { readFileTimestamps },

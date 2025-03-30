@@ -48,48 +48,48 @@ export const LSTool = {
   renderResultForAssistant(data) {
     return data
   },
-  renderToolUseMessage({ path }, { verbose }) {
-    const absolutePath = path
-      ? isAbsolute(path)
-        ? path
-        : resolve(getCwd(), path)
-      : undefined
-    const relativePath = absolutePath ? relative(getCwd(), absolutePath) : '.'
-    return `path: "${verbose ? path : relativePath}"`
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-  renderToolResultMessage(content, { verbose }) {
-    if (typeof content !== 'string') {
-      return null
-    }
-    const result = content.replace(TRUNCATED_MESSAGE, '')
-    if (!result) {
-      return null
-    }
-    return (
-      <Box justifyContent="space-between" width="100%">
-        <Box>
-          <Text>&nbsp;&nbsp;⎿ &nbsp;</Text>
-          <Box flexDirection="column" paddingLeft={0}>
-            {result
-              .split('\n')
-              .filter(_ => _.trim() !== '')
-              .slice(0, verbose ? undefined : MAX_LINES)
-              .map((_, i) => (
-                <Text key={i}>{_}</Text>
-              ))}
-            {!verbose && result.split('\n').length > MAX_LINES && (
-              <Text color={getTheme().secondaryText}>
-                ... (+{result.split('\n').length - MAX_LINES} items)
-              </Text>
-            )}
-          </Box>
-        </Box>
-      </Box>
-    )
-  },
+  // renderToolUseMessage({ path }, { verbose }) {
+  //   const absolutePath = path
+  //     ? isAbsolute(path)
+  //       ? path
+  //       : resolve(getCwd(), path)
+  //     : undefined
+  //   const relativePath = absolutePath ? relative(getCwd(), absolutePath) : '.'
+  //   return `path: \"${verbose ? path : relativePath}\"`
+  // },
+  // renderToolUseRejectedMessage() {
+  //   return <FallbackToolUseRejectedMessage />
+  // },
+  // renderToolResultMessage(content, { verbose }) {
+  //   if (typeof content !== 'string') {
+  //     return null
+  //   }
+  //   const result = content.replace(TRUNCATED_MESSAGE, '')
+  //   if (!result) {
+  //     return null
+  //   }
+  //   return (
+  //     <Box justifyContent=\"space-between\" width=\"100%\">
+  //       <Box>
+  //         <Text>&nbsp;&nbsp;⎿ &nbsp;</Text>
+  //         <Box flexDirection=\"column\" paddingLeft={0}>
+  //           {result
+  //             .split('\n')
+  //             .filter(_ => _.trim() !== '')
+  //             .slice(0, verbose ? undefined : MAX_LINES)
+  //             .map((_, i) => (
+  //               <Text key={i}>{_}</Text>
+  //             ))}
+  //           {!verbose && result.split('\n').length > MAX_LINES && (
+  //             <Text color={getTheme().secondaryText}>
+  //               ... (+{result.split('\n').length - MAX_LINES} items)
+  //             </Text>
+  //           )}
+  //         </Box>
+  //       </Box>
+  //     </Box>
+  //   )
+  // },
   async *call({ path }, { abortController }) {
     const fullFilePath = isAbsolute(path) ? path : resolve(getCwd(), path)
     const result = listDirectory(

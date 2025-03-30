@@ -73,30 +73,6 @@ export const NotebookEditTool = {
         return `Deleted cell ${cell_number}`
     }
   },
-  renderToolUseMessage(input, { verbose }) {
-    return `notebook_path: ${verbose ? input.notebook_path : relative(getCwd(), input.notebook_path)}, cell: ${input.cell_number}, content: ${input.new_source.slice(0, 30)}…, cell_type: ${input.cell_type}, edit_mode: ${input.edit_mode ?? 'replace'}`
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-  renderToolResultMessage({ cell_number, new_source, language, error }) {
-    if (error) {
-      return (
-        <Box flexDirection="column">
-          <Text color="red">{error}</Text>
-        </Box>
-      )
-    }
-
-    return (
-      <Box flexDirection="column">
-        <Text>Updated cell {cell_number}:</Text>
-        <Box marginLeft={2}>
-          <HighlightedCode code={new_source} language={language} />
-        </Box>
-      </Box>
-    )
-  },
   async validateInput({
     notebook_path,
     cell_number,

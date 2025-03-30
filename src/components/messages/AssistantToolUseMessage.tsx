@@ -7,8 +7,9 @@ import { Cost } from '../Cost'
 import { ToolUseLoader } from '../ToolUseLoader'
 import { getTheme } from '../../utils/theme'
 import { BLACK_CIRCLE } from '../../constants/figures'
-import { ThinkTool } from '../../tools/ThinkTool/ThinkTool'
+import { ThinkTool } from 'tools/ThinkTool/ThinkTool'
 import { AssistantThinkingMessage } from './AssistantThinkingMessage'
+import { renderToolUseMessage } from 'cli/renderers/toolRenderers'
 
 type Props = {
   param: ToolUseBlockParam
@@ -50,8 +51,8 @@ export function AssistantToolUseMessage({
   const color = isQueued ? getTheme().secondaryText : undefined
 
   // TODO: Avoid this special case
-  if (tool === ThinkTool) {
-    // params were already validated in query(), so this won't throe
+  if (tool.name === ThinkTool.name) {
+    // params were already validated in query(), so this won't throw
     const { thought } = ThinkTool.inputSchema.parse(param.input)
     return (
       <AssistantThinkingMessage
@@ -95,9 +96,7 @@ export function AssistantToolUseMessage({
             0 && (
             <Text color={color}>
               (
-              {tool.renderToolUseMessage(param.input as never, {
-                verbose,
-              })}
+              {renderToolUseMessage(tool.name, param.input, verbose)}
               )
             </Text>
           )}

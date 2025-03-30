@@ -119,28 +119,6 @@ export const BashTool = {
 
     return { result: true }
   },
-  renderToolUseMessage({ command }) {
-    // Clean up any command that uses the quoted HEREDOC pattern
-    if (command.includes("\"$(cat <<'EOF'")) {
-      const match = command.match(
-        /^(.*?)"?\$\(cat <<'EOF'\n([\s\S]*?)\n\s*EOF\n\s*\)"(.*)$/,
-      )
-      if (match && match[1] && match[2]) {
-        const prefix = match[1]
-        const content = match[2]
-        const suffix = match[3] || ''
-        return `${prefix.trim()} "${content.trim()}"${suffix.trim()}`
-      }
-    }
-    return command
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-
-  renderToolResultMessage(content, { verbose }) {
-    return <BashToolResultMessage content={content} verbose={verbose} />
-  },
   renderResultForAssistant({ interrupted, stdout, stderr }) {
     let errorMessage = stderr.trim()
     if (interrupted) {
@@ -187,7 +165,7 @@ export const BashTool = {
             ? filePath
             : resolve(getCwd(), filePath)
 
-          // Try/catch in case the file doesn't exist (because Haiku didn't properly extract it)
+          // Try/catch in case the file doesn't exist (because Haiku didn't properly extracted it)
           try {
             readFileTimestamps[fullFilePath] = statSync(fullFilePath).mtimeMs
           } catch (e) {

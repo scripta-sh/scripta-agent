@@ -39,23 +39,6 @@ export const MemoryWriteTool = {
   renderResultForAssistant(content) {
     return content
   },
-  renderToolUseMessage(input) {
-    return Object.entries(input)
-      .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-      .join(', ')
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-  renderToolResultMessage() {
-    return (
-      <Box justifyContent="space-between" overflowX="hidden" width="100%">
-        <Box flexDirection="row">
-          <Text>{'  '}⎿ Updated memory</Text>
-        </Box>
-      </Box>
-    )
-  },
   async validateInput({ file_path }) {
     const fullPath = join(MEMORY_DIR, file_path)
     if (!fullPath.startsWith(MEMORY_DIR)) {

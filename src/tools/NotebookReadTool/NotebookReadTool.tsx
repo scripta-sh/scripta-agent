@@ -108,22 +108,6 @@ export const NotebookReadTool = {
 
     return { result: true }
   },
-  renderToolUseMessage(input, { verbose }) {
-    return `notebook_path: ${verbose ? input.notebook_path : relative(getCwd(), input.notebook_path)}`
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-
-  renderToolResultMessage(content) {
-    if (!content) {
-      return <Text>No cells found in notebook</Text>
-    }
-    if (content.length < 1 || !content[0]) {
-      return <Text>No cells found in notebook</Text>
-    }
-    return <Text>Read {content.length} cells</Text>
-  },
   async *call({ notebook_path }) {
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path

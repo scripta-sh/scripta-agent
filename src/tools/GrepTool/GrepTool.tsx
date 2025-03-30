@@ -62,33 +62,6 @@ export const GrepTool = {
   async prompt() {
     return DESCRIPTION
   },
-  renderToolUseMessage({ pattern, path, include }, { verbose }) {
-    const { absolutePath, relativePath } = getAbsoluteAndRelativePaths(path)
-    return `pattern: "${pattern}"${relativePath || verbose ? `, path: "${verbose ? absolutePath : relativePath}"` : ''}${include ? `, include: "${include}"` : ''}`
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-  renderToolResultMessage(output) {
-    // Handle string content for backward compatibility
-    if (typeof output === 'string') {
-      // Convert string to Output type using tmpDeserializeOldLogResult if needed
-      output = output as unknown as Output
-    }
-
-    return (
-      <Box justifyContent="space-between" width="100%">
-        <Box flexDirection="row">
-          <Text>&nbsp;&nbsp;⎿ &nbsp;Found </Text>
-          <Text bold>{output.numFiles} </Text>
-          <Text>
-            {output.numFiles === 0 || output.numFiles > 1 ? 'files' : 'file'}
-          </Text>
-        </Box>
-        <Cost costUSD={0} durationMs={output.durationMs} debug={false} />
-      </Box>
-    )
-  },
   renderResultForAssistant({ numFiles, filenames }) {
     if (numFiles === 0) {
       return 'No files found'

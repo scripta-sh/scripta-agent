@@ -198,11 +198,4 @@ export const AgentTool = {
   renderResultForAssistant(data) {
     return data
   },
-  renderToolUseMessage({ prompt }, { verbose }) {
-    const lines = prompt.split(EOL)
-    return applyMarkdown(!verbose && lines.length > 1 ? lines[0] + '…' : prompt)
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
 } satisfies Tool<typeof inputSchema, TextBlock[]>

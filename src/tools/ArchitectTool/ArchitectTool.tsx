@@ -98,22 +98,4 @@ export const ArchitectTool = {
   renderResultForAssistant(data) {
     return data
   },
-  renderToolUseMessage(input) {
-    return Object.entries(input)
-      .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-      .join(', ')
-  },
-  renderToolResultMessage(content) {
-    return (
-      <Box flexDirection="column" gap={1}>
-        <HighlightedCode
-          code={content.map(_ => _.text).join('\n')}
-          language="markdown"
-        />
-      </Box>
-    )
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
 } satisfies Tool<typeof inputSchema, TextBlock[]>

@@ -77,16 +77,5 @@ export const StickerRequestTool: Tool = {
     }
   },
 
-  renderToolUseMessage(_input) {
-    return ''
-  },
-
-  renderToolUseRejectedMessage: _input => (
-    <Text>
-      &nbsp;&nbsp;⎿ &nbsp;
-      <Text color={getTheme().error}>No (Sticker request cancelled)</Text>
-    </Text>
-  ),
-
   renderResultForAssistant: (content: string) => content,
 }

@@ -38,18 +38,5 @@ export const ThinkTool = {
     }
   },
 
-  // This is never called -- it's special-cased in AssistantToolUseMessage
-  renderToolUseMessage(input) {
-    return input.thought
-  },
-
-  renderToolUseRejectedMessage() {
-    return (
-      <MessageResponse>
-        <Text color={getTheme().error}>Thought cancelled</Text>
-      </MessageResponse>
-    )
-  },
-
   renderResultForAssistant: () => 'Your thought has been logged.',
 } satisfies Tool<typeof thinkToolSchema>

@@ -48,39 +48,6 @@ export const GlobTool = {
   async prompt() {
     return DESCRIPTION
   },
-  renderToolUseMessage({ pattern, path }, { verbose }) {
-    const absolutePath = path
-      ? isAbsolute(path)
-        ? path
-        : resolve(getCwd(), path)
-      : undefined
-    const relativePath = absolutePath
-      ? relative(getCwd(), absolutePath)
-      : undefined
-    return `pattern: "${pattern}"${relativePath || verbose ? `, path: "${verbose ? absolutePath : relativePath}"` : ''}`
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-  renderToolResultMessage(output) {
-    // Handle string content for backward compatibility
-    if (typeof output === 'string') {
-      output = JSON.parse(output) as Output
-    }
-
-    return (
-      <Box justifyContent="space-between" width="100%">
-        <Box flexDirection="row">
-          <Text>&nbsp;&nbsp;⎿ &nbsp;Found </Text>
-          <Text bold>{output.numFiles} </Text>
-          <Text>
-            {output.numFiles === 0 || output.numFiles > 1 ? 'files' : 'file'}
-          </Text>
-        </Box>
-        <Cost costUSD={0} durationMs={output.durationMs} debug={false} />
-      </Box>
-    )
-  },
   async *call({ pattern, path }, { abortController }) {
     const start = Date.now()
     const { files, truncated } = await glob(

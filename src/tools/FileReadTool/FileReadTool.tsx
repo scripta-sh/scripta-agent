@@ -75,63 +75,6 @@ export const FileReadTool = {
   needsPermissions({ file_path }) {
     return !hasReadPermission(file_path || getCwd())
   },
-  renderToolUseMessage(input, { verbose }) {
-    const { file_path, ...rest } = input
-    const entries = [
-      ['file_path', verbose ? file_path : relative(getCwd(), file_path)],
-      ...Object.entries(rest),
-    ]
-    return entries
-      .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-      .join(', ')
-  },
-  renderToolResultMessage(output, { verbose }) {
-    // TODO: Render recursively
-    switch (output.type) {
-      case 'image':
-        return (
-          <Box justifyContent="space-between" overflowX="hidden" width="100%">
-            <Box flexDirection="row">
-              <Text>&nbsp;&nbsp;⎿ &nbsp;</Text>
-              <Text>Read image</Text>
-            </Box>
-          </Box>
-        )
-      case 'text': {
-        const { filePath, content, numLines } = output.file
-        const contentWithFallback = content || '(No content)'
-        return (
-          <Box justifyContent="space-between" overflowX="hidden" width="100%">
-            <Box flexDirection="row">
-              <Text>&nbsp;&nbsp;⎿ &nbsp;</Text>
-              <Box flexDirection="column">
-                <HighlightedCode
-                  code={
-                    verbose
-                      ? contentWithFallback
-                      : contentWithFallback
-                          .split('\n')
-                          .slice(0, MAX_LINES_TO_RENDER)
-                          .filter(_ => _.trim() !== '')
-                          .join('\n')
-                  }
-                  language={extname(filePath).slice(1)}
-                />
-                {!verbose && numLines > MAX_LINES_TO_RENDER && (
-                  <Text color={getTheme().secondaryText}>
-                    ... (+{numLines - MAX_LINES_TO_RENDER} lines)
-                  </Text>
-                )}
-              </Box>
-            </Box>
-          </Box>
-        )
-      }
-    }
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
   async validateInput({ file_path, offset, limit }) {
     const fullFilePath = normalizeFilePath(file_path)
 

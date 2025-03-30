@@ -41,24 +41,6 @@ export const MemoryReadTool = {
   renderResultForAssistant({ content }) {
     return content
   },
-  renderToolUseMessage(input) {
-    return Object.entries(input)
-      .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-      .join(', ')
-  },
-  renderToolUseRejectedMessage() {
-    return <FallbackToolUseRejectedMessage />
-  },
-  renderToolResultMessage(output) {
-    return (
-      <Box justifyContent="space-between" overflowX="hidden" width="100%">
-        <Box flexDirection="row">
-          <Text>&nbsp;&nbsp;⎿ &nbsp;</Text>
-          <Text>{output.content}</Text>
-        </Box>
-      </Box>
-    )
-  },
   async validateInput({ file_path }) {
     if (file_path) {
       const fullPath = join(MEMORY_DIR, file_path)
