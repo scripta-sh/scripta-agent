@@ -1,5 +1,5 @@
 import { ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import { Box, Newline, Static } from 'ink'
+import { Box, Newline, Static, useApp, useInput, useStdin } from 'ink'
 import ProjectOnboarding, {
   markProjectOnboardingComplete,
 } from '../ProjectOnboarding.js'
@@ -13,8 +13,8 @@ import { MessageResponse } from '../components/MessageResponse'
 import { MessageSelector } from '../components/MessageSelector'
 import {
   PermissionRequest,
-  type ToolUseConfirm,
-} from '../components/permissions/PermissionRequest.js'
+  ToolUseConfirm,
+} from '../components/permissions/PermissionRequest'
 import PromptInput from '../components/PromptInput'
 import { Spinner } from '../components/Spinner'
 import { getSystemPrompt } from '../constants/prompts'
@@ -22,18 +22,15 @@ import { getContext } from '../context'
 import { getTotalCost, useCostSummary } from '../cost-tracker'
 import { useLogStartupTime } from '../hooks/useLogStartupTime'
 import { addToHistory } from '../history'
-import { useApiKeyVerification } from '../hooks/useApiKeyVerification'
 import { useCancelRequest } from '../hooks/useCancelRequest'
-import useCanUseTool from '../hooks/useCanUseTool'
 import { useLogMessages } from '../hooks/useLogMessages'
-import { setMessagesGetter, setMessagesSetter } from '../messages'
 import {
   type AssistantMessage,
   type BinaryFeedbackResult,
   type Message as MessageType,
   type ProgressMessage,
   query,
-} from '../query.js'
+} from '../query'
 import type { WrappedClient } from '../services/mcpClient'
 import type { Tool } from '../Tool'
 import { AutoUpdaterResult } from '../utils/autoUpdater'
@@ -54,11 +51,13 @@ import {
   processUserInput,
   reorderMessages,
 } from '../utils/messages.js'
-import { getSlowAndCapableModel } from '../utils/model'
+import { getSlowAndCapableModel, isDefaultSlowAndCapableModel } from '../utils/model'
 import { clearTerminal, updateTerminalTitle } from '../utils/terminal'
 import { BinaryFeedback } from '../components/binary-feedback/BinaryFeedback'
 import { getMaxThinkingTokens } from '../utils/thinking'
+import { CliPermissionHandler } from '../cli/permissions/CliPermissionHandler'
 import { getOriginalCwd } from '../utils/state'
+import { getClients } from '../services/mcpClient.js'
 
 type Props = {
   commands: Command[]
@@ -77,12 +76,6 @@ type Props = {
   mcpClients?: WrappedClient[]
   // Flag to indicate if current model is default
   isDefaultModel?: boolean
-}
-
-export type BinaryFeedbackContext = {
-  m1: AssistantMessage
-  m2: AssistantMessage
-  resolve: (result: BinaryFeedbackResult) => void
 }
 
 export function REPL({
@@ -136,29 +129,47 @@ export function REPL({
   )
 
   const [binaryFeedbackContext, setBinaryFeedbackContext] =
-    useState<BinaryFeedbackContext | null>(null)
+    useState<any | null>(null)
 
-  const getBinaryFeedbackResponse = useCallback(
-    (
-      m1: AssistantMessage,
-      m2: AssistantMessage,
-    ): Promise<BinaryFeedbackResult> => {
-      return new Promise<BinaryFeedbackResult>(resolvePromise => {
-        setBinaryFeedbackContext({
-          m1,
-          m2,
-          resolve: resolvePromise,
-        })
-      })
-    },
-    [],
-  )
+  const { isRawModeSupported } = useStdin()
+  const readFileTimestamps = useRef(new Map<string, number>())
+  const { exit } = useApp()
+  // const { getBinaryFeedbackResponse } = useBinaryFeedback(messages)
+  // MCP State
+  // const { mcpClients, isDefaultModel } = useMCP()
 
-  const readFileTimestamps = useRef<{
-    [filename: string]: number
-  }>({})
+  // Add state for logo data
+  const [mcpClientState, setMcpClientState] = useState<WrappedClient[]>([]);
+  const [isDefaultModelState, setIsDefaultModelState] = useState<boolean>(true);
 
-  const { status: apiKeyStatus, reverify } = useApiKeyVerification()
+  // Instantiate the permission handler
+  const permissionHandler = useMemo(() => new CliPermissionHandler(setToolUseConfirm), []);
+
+  // Effect to fetch logo data
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchData = async () => {
+      try {
+        const [clients, isDefault] = await Promise.all([
+          getClients(),
+          isDefaultSlowAndCapableModel()
+        ]);
+        if (isMounted) {
+          setMcpClientState(clients);
+          setIsDefaultModelState(isDefault);
+        }
+      } catch (error) {
+         console.error("Failed to fetch data for Logo:", error);
+         // Optionally set an error state
+      }
+    };
+
+    fetchData();
+
+    return () => { isMounted = false; }; // Cleanup function
+  }, []); // Empty dependency array means run once on mount
+
   function onCancel() {
     if (!isLoading) {
       return
@@ -198,10 +209,8 @@ export function REPL({
     }
   }, [messages, showCostDialog, haveShownCostDialog])
 
-  const canUseTool = useCanUseTool(setToolUseConfirm)
-
   async function onInit() {
-    reverify()
+    // reverify()
 
     if (!initialPrompt) {
       return
@@ -220,11 +229,11 @@ export function REPL({
       {
         abortController,
         options: {
-          commands,
-          forkNumber,
+          // commands,
+          // forkNumber,
           messageLogName,
           tools,
-          verbose,
+          // verbose,
           slowAndCapableModel: model,
           maxThinkingTokens: 0,
         },
@@ -265,24 +274,22 @@ export function REPL({
         [...messages, ...newMessages],
         systemPrompt,
         context,
-        canUseTool,
+        permissionHandler,
         {
           options: {
-            commands,
-            forkNumber,
-            messageLogName,
+            // commands,
+            // forkNumber,
+            // messageLogName,
             tools,
             slowAndCapableModel: model,
-            verbose,
+            // verbose,
             dangerouslySkipPermissions,
             maxThinkingTokens,
           },
-          messageId: getLastAssistantMessageId([...messages, ...newMessages]),
           readFileTimestamps: readFileTimestamps.current,
           abortController,
-          setToolJSX,
         },
-        getBinaryFeedbackResponse,
+        // getBinaryFeedbackResponse,
       )) {
         setMessages(oldMessages => [...oldMessages, message])
       }
@@ -338,24 +345,22 @@ export function REPL({
       [...messages, lastMessage],
       systemPrompt,
       context,
-      canUseTool,
+      permissionHandler,
       {
         options: {
-          commands,
-          forkNumber,
-          messageLogName,
+          // commands,
+          // forkNumber,
+          // messageLogName,
           tools,
           slowAndCapableModel: model,
-          verbose,
+          // verbose,
           dangerouslySkipPermissions,
           maxThinkingTokens,
         },
-        messageId: getLastAssistantMessageId([...messages, lastMessage]),
         readFileTimestamps: readFileTimestamps.current,
         abortController,
-        setToolJSX,
       },
-      getBinaryFeedbackResponse,
+      // getBinaryFeedbackResponse,
     )) {
       setMessages(oldMessages => [...oldMessages, message])
     }
@@ -366,11 +371,11 @@ export function REPL({
   useCostSummary()
 
   // Register messages getter and setter
-  useEffect(() => {
-    const getMessages = () => messages
-    setMessagesGetter(getMessages)
-    setMessagesSetter(setMessages)
-  }, [messages])
+  // useEffect(() => {
+  //   const getMessages = () => messages
+  //   setMessagesGetter(getMessages)
+  //   setMessagesSetter(setMessages)
+  // }, [messages])
 
   // Record transcripts locally, for debugging and conversation recovery
   useLogMessages(messages, messageLogName, forkNumber)
@@ -416,7 +421,7 @@ export function REPL({
         type: 'static',
         jsx: (
           <Box flexDirection="column" key={`logo${forkNumber}`}>
-            <Logo mcpClients={mcpClients} isDefaultModel={isDefaultModel} />
+            <Logo mcpClients={mcpClientState} isDefaultModel={isDefaultModelState} />
             <ProjectOnboarding workspaceDir={getOriginalCwd()} />
           </Box>
         ),
@@ -444,7 +449,7 @@ export function REPL({
                 shouldShowDot={false}
               />
             ) : (
-              <MessageResponse>
+              <MessageResponse children={
                 <Message
                   message={_.content}
                   messages={_.normalizedMessages}
@@ -462,7 +467,7 @@ export function REPL({
                   shouldAnimate={false}
                   shouldShowDot={false}
                 />
-              </MessageResponse>
+              } />
             )
           ) : (
             <Message
@@ -531,8 +536,8 @@ export function REPL({
     toolUseConfirm,
     isMessageSelectorVisible,
     unresolvedToolUseIDs,
-    mcpClients,
-    isDefaultModel,
+    mcpClientState,
+    isDefaultModelState,
   ])
 
   // only show the dialog once not loading
@@ -541,10 +546,9 @@ export function REPL({
   return (
     <>
       <Static
-        key={`static-messages-${forkNumber}`}
         items={messagesJSX.filter(_ => _.type === 'static')}
       >
-        {_ => _.jsx}
+        {(item: { jsx: React.ReactNode }) => item.jsx}
       </Static>
       {messagesJSX.filter(_ => _.type === 'transient').map(_ => _.jsx)}
       <Box
@@ -557,7 +561,7 @@ export function REPL({
           <Spinner />
         )}
         {toolJSX ? toolJSX.jsx : null}
-        {!toolJSX && binaryFeedbackContext && !isMessageSelectorVisible && (
+        {/* {!toolJSX && binaryFeedbackContext && !isMessageSelectorVisible && (
           <BinaryFeedback
             m1={binaryFeedbackContext.m1}
             m2={binaryFeedbackContext.m2}
@@ -573,7 +577,7 @@ export function REPL({
             inProgressToolUseIDs={inProgressToolUseIDs}
             unresolvedToolUseIDs={unresolvedToolUseIDs}
           />
-        )}
+        )} */}
         {!toolJSX &&
           toolUseConfirm &&
           !isMessageSelectorVisible &&
@@ -581,7 +585,7 @@ export function REPL({
             <PermissionRequest
               toolUseConfirm={toolUseConfirm}
               onDone={() => setToolUseConfirm(null)}
-              verbose={verbose}
+              verbose={verbose ?? false}
             />
           )}
         {!toolJSX &&
@@ -615,7 +619,7 @@ export function REPL({
                 forkNumber={forkNumber}
                 messageLogName={messageLogName}
                 tools={tools}
-                isDisabled={apiKeyStatus === 'invalid'}
+                isDisabled={false}
                 isLoading={isLoading}
                 onQuery={onQuery}
                 debug={debug}

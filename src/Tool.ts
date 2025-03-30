@@ -2,6 +2,9 @@ import { z } from 'zod'
 import * as React from 'react'
 import { ToolUseContext } from './ToolUseContext'
 
+// Export ToolUseContext if it's defined here or re-export if imported
+export { ToolUseContext }
+
 export interface Tool {
   name: string
   description?: string | ((input: any) => Promise<string>)

@@ -2,9 +2,10 @@ import {
   Message as APIAssistantMessage,
   MessageParam,
   ToolUseBlock,
+  ContentBlock,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { UUID } from 'crypto'
-import type { Tool, ToolUseContext } from './Tool'
+import { UUID, randomUUID } from 'crypto'
+import type { Tool } from './Tool'
 import {
   messagePairValidForBinaryFeedback,
   shouldUseBinaryFeedback,
@@ -13,6 +14,7 @@ import { CanUseToolFn } from './hooks/useCanUseTool'
 import {
   formatSystemPromptWithContext,
   queryAnthropicModel,
+  queryOpenAI,
 } from './services/claude.js'
 import { logEvent } from './services/statsig'
 import { all } from './utils/generators'
@@ -28,9 +30,11 @@ import {
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
   NormalizedMessage,
   normalizeMessagesForAPI,
+  REJECT_MESSAGE,
 } from './utils/messages.js'
 import { BashTool } from './tools/BashTool/BashTool'
 import { getCwd } from './utils/state'
+import { IPermissionHandler, PermissionHandlerContext } from './core/permissions/IPermissionHandler'
 
 export type Response = { costUSD: number; response: string }
 export type UserMessage = {
@@ -126,7 +130,7 @@ export async function* query(
   messages: Message[],
   systemPrompt: string[],
   context: { [k: string]: string },
-  canUseTool: CanUseToolFn,
+  permissionHandler: IPermissionHandler,
   toolUseContext: ToolUseContext,
   getBinaryFeedbackResponse?: (
     m1: AssistantMessage,
@@ -211,7 +215,7 @@ export async function* query(
     for await (const message of runToolsConcurrently(
       toolUseMessages,
       assistantMessage,
-      canUseTool,
+      permissionHandler,
       toolUseContext,
       shouldSkipPermissionCheck,
     )) {
@@ -225,7 +229,7 @@ export async function* query(
     for await (const message of runToolsSerially(
       toolUseMessages,
       assistantMessage,
-      canUseTool,
+      permissionHandler,
       toolUseContext,
       shouldSkipPermissionCheck,
     )) {
@@ -257,7 +261,7 @@ export async function* query(
     [...messages, assistantMessage, ...orderedToolResults],
     systemPrompt,
     context,
-    canUseTool,
+    permissionHandler,
     toolUseContext,
     getBinaryFeedbackResponse,
   )
@@ -266,7 +270,7 @@ export async function* query(
 async function* runToolsConcurrently(
   toolUseMessages: ToolUseBlock[],
   assistantMessage: AssistantMessage,
-  canUseTool: CanUseToolFn,
+  permissionHandler: IPermissionHandler,
   toolUseContext: ToolUseContext,
   shouldSkipPermissionCheck?: boolean,
 ): AsyncGenerator<Message, void> {
@@ -276,7 +280,7 @@ async function* runToolsConcurrently(
         toolUse,
         new Set(toolUseMessages.map(_ => _.id)),
         assistantMessage,
-        canUseTool,
+        permissionHandler,
         toolUseContext,
         shouldSkipPermissionCheck,
       ),
@@ -288,7 +292,7 @@ async function* runToolsConcurrently(
 async function* runToolsSerially(
   toolUseMessages: ToolUseBlock[],
   assistantMessage: AssistantMessage,
-  canUseTool: CanUseToolFn,
+  permissionHandler: IPermissionHandler,
   toolUseContext: ToolUseContext,
   shouldSkipPermissionCheck?: boolean,
 ): AsyncGenerator<Message, void> {
@@ -297,7 +301,7 @@ async function* runToolsSerially(
       toolUse,
       new Set(toolUseMessages.map(_ => _.id)),
       assistantMessage,
-      canUseTool,
+      permissionHandler,
       toolUseContext,
       shouldSkipPermissionCheck,
     )
@@ -308,7 +312,7 @@ export async function* runToolUse(
   toolUse: ToolUseBlock,
   siblingToolUseIDs: Set<string>,
   assistantMessage: AssistantMessage,
-  canUseTool: CanUseToolFn,
+  permissionHandler: IPermissionHandler,
   toolUseContext: ToolUseContext,
   shouldSkipPermissionCheck?: boolean,
 ): AsyncGenerator<Message, void> {
@@ -349,17 +353,188 @@ export async function* runToolUse(
       return
     }
 
-    for await (const message of checkPermissionsAndCallTool(
-      tool,
-      toolUse.id,
-      siblingToolUseIDs,
-      toolInput,
+    // Validate input types with zod
+    // (surprisingly, the model is not great at generating valid input)
+    const isValidInput = tool.inputSchema.safeParse(toolInput)
+    if (!isValidInput.success) {
+      logEvent('tengu_tool_use_error', {
+        error: `InputValidationError: ${isValidInput.error.message}`,
+        messageID: assistantMessage.message.id,
+        toolName: tool.name,
+        toolInput: JSON.stringify(toolInput).slice(0, 200),
+      })
+      yield createUserMessage([
+        {
+          type: 'tool_result',
+          content: `InputValidationError: ${isValidInput.error.message}`,
+          is_error: true,
+          tool_use_id: toolUse.id,
+        },
+      ])
+      return
+    }
+
+    const normalizedInput = normalizeToolInput(tool, toolInput)
+
+    // Validate input values. Each tool has its own validation logic
+    const isValidCall = await tool.validateInput?.(
+      normalizedInput as never,
       toolUseContext,
-      canUseTool,
-      assistantMessage,
-      shouldSkipPermissionCheck,
-    )) {
-      yield message
+    )
+    if (isValidCall?.result === false) {
+      logEvent('tengu_tool_use_error', {
+        error: isValidCall?.message.slice(0, 2000),
+        messageID: assistantMessage.message.id,
+        toolName: tool.name,
+        toolInput: JSON.stringify(toolInput).slice(0, 200),
+        ...(isValidCall?.meta ?? {}),
+      })
+      yield createUserMessage([
+        {
+          type: 'tool_result',
+          content: isValidCall!.message,
+          is_error: true,
+          tool_use_id: toolUse.id,
+        },
+      ])
+      return
+    }
+
+    // --- CORRECTED PERMISSION LOGIC START ---
+    let hasPermission = false;
+    // Prepare the simpler context for the permission handler
+    const permissionContext: PermissionHandlerContext = {
+        abortController: toolUseContext.abortController,
+        options: {
+            dangerouslySkipPermissions: shouldSkipPermissionCheck
+        }
+        // NOTE: Add other options if needed by CliPermissionHandler's check/request logic
+    };
+
+    if (shouldSkipPermissionCheck) {
+        hasPermission = true;
+        logEvent('tengu_tool_use_permission_skipped', { toolName: tool.name });
+    } else {
+        // Step 1: Check if permission already exists
+        hasPermission = await permissionHandler.checkPermission(tool, normalizedInput, permissionContext);
+        if (!hasPermission) {
+            logEvent('tengu_tool_use_permission_requesting', { toolName: tool.name });
+            // Step 2: If not, request permission from the user, passing assistantMessage
+            hasPermission = await permissionHandler.requestPermission(
+               tool, 
+               normalizedInput, 
+               permissionContext, 
+               assistantMessage
+            );
+        } else {
+            // Permission was already granted (e.g., by config)
+            logEvent('tengu_tool_use_permission_pre_granted', { toolName: tool.name });
+        }
+    }
+
+    // Handle result based on hasPermission
+    if (!hasPermission) {
+      // Permission denied or aborted by user during requestPermission
+      // Logging for grant/reject/abort is handled within CliPermissionHandler now
+      yield createUserMessage([
+         createToolResultStopMessage(toolUse.id),
+      ]);
+      return;
+    }
+    // --- CORRECTED PERMISSION LOGIC END ---
+
+    // Permission granted!
+    logEvent('tengu_tool_use_executing', { toolName: tool.name });
+
+    // Yield progress message
+    const assistantMsgWithToolUse = assistantMessage?.message.content.find(
+      c => c.type === 'tool_use' && c.id === toolUse.id,
+    );
+    if (assistantMsgWithToolUse) {
+      // Corrected: Manually construct the AssistantMessage object
+      const progressAssistantMessage: AssistantMessage = {
+        // Mimic structure of AssistantMessage, but use the specific content block
+        type: 'assistant',
+        message: {
+          id: assistantMessage.message.id, // Use the original message ID
+          type: 'message',
+          role: 'assistant',
+          content: [assistantMsgWithToolUse], // Pass the actual ContentBlock
+          model: assistantMessage.message.model,
+          stop_reason: assistantMessage.message.stop_reason,
+          stop_sequence: assistantMessage.message.stop_sequence,
+          usage: { input_tokens: 0, output_tokens: 0 }, // Dummy usage for progress
+        },
+        costUSD: 0, // No cost for progress message
+        durationMs: 0, // No duration for progress message
+        uuid: randomUUID(), // Generate new UUID for this message object
+      };
+
+      yield createProgressMessage(
+        toolUse.id,
+        siblingToolUseIDs,
+        progressAssistantMessage, // Pass the manually constructed message
+        [],
+        toolUseContext.options.tools
+      );
+    }
+
+    // Call the tool
+    try {
+      // Ensure tool.call only receives input and context
+      const generator = tool.call(normalizedInput as never, toolUseContext);
+      for await (const result of generator) {
+        switch (result.type) {
+          case 'result':
+            logEvent('tengu_tool_use_success', {
+              messageID: assistantMessage.message.id,
+              toolName: tool.name,
+            })
+            yield createUserMessage(
+              [
+                {
+                  type: 'tool_result',
+                  content: result.resultForAssistant,
+                  tool_use_id: toolUse.id,
+                },
+              ],
+              {
+                data: result.data,
+                resultForAssistant: result.resultForAssistant,
+              },
+            )
+            return
+          case 'progress':
+            logEvent('tengu_tool_use_progress', {
+              messageID: assistantMessage.message.id,
+              toolName: tool.name,
+            })
+            yield createProgressMessage(
+              toolUse.id,
+              siblingToolUseIDs,
+              result.content,
+              result.normalizedMessages,
+              result.tools,
+            )
+        }
+      }
+    } catch (error) {
+      const content = formatError(error)
+      logError(error)
+      logEvent('tengu_tool_use_error', {
+        error: content.slice(0, 2000),
+        messageID: assistantMessage.message.id,
+        toolName: tool.name,
+        toolInput: JSON.stringify(toolInput).slice(0, 1000),
+      })
+      yield createUserMessage([
+        {
+          type: 'tool_result',
+          content,
+          is_error: true,
+          tool_use_id: toolUse.id,
+        },
+      ])
     }
   } catch (e) {
     logError(e)
@@ -384,138 +559,6 @@ export function normalizeToolInput(
   }
 }
 
-async function* checkPermissionsAndCallTool(
-  tool: Tool,
-  toolUseID: string,
-  siblingToolUseIDs: Set<string>,
-  input: { [key: string]: boolean | string | number },
-  context: ToolUseContext,
-  canUseTool: CanUseToolFn,
-  assistantMessage: AssistantMessage,
-  shouldSkipPermissionCheck?: boolean,
-): AsyncGenerator<UserMessage | ProgressMessage, void> {
-  // Validate input types with zod
-  // (surprisingly, the model is not great at generating valid input)
-  const isValidInput = tool.inputSchema.safeParse(input)
-  if (!isValidInput.success) {
-    logEvent('tengu_tool_use_error', {
-      error: `InputValidationError: ${isValidInput.error.message}`,
-      messageID: assistantMessage.message.id,
-      toolName: tool.name,
-      toolInput: JSON.stringify(input).slice(0, 200),
-    })
-    yield createUserMessage([
-      {
-        type: 'tool_result',
-        content: `InputValidationError: ${isValidInput.error.message}`,
-        is_error: true,
-        tool_use_id: toolUseID,
-      },
-    ])
-    return
-  }
-
-  const normalizedInput = normalizeToolInput(tool, input)
-
-  // Validate input values. Each tool has its own validation logic
-  const isValidCall = await tool.validateInput?.(
-    normalizedInput as never,
-    context,
-  )
-  if (isValidCall?.result === false) {
-    logEvent('tengu_tool_use_error', {
-      error: isValidCall?.message.slice(0, 2000),
-      messageID: assistantMessage.message.id,
-      toolName: tool.name,
-      toolInput: JSON.stringify(input).slice(0, 200),
-      ...(isValidCall?.meta ?? {}),
-    })
-    yield createUserMessage([
-      {
-        type: 'tool_result',
-        content: isValidCall!.message,
-        is_error: true,
-        tool_use_id: toolUseID,
-      },
-    ])
-    return
-  }
-
-  // Check whether we have permission to use the tool,
-  // and ask the user for permission if we don't
-  const permissionResult = shouldSkipPermissionCheck
-    ? ({ result: true } as const)
-    : await canUseTool(tool, normalizedInput, context, assistantMessage)
-  if (permissionResult.result === false) {
-    yield createUserMessage([
-      {
-        type: 'tool_result',
-        content: permissionResult.message,
-        is_error: true,
-        tool_use_id: toolUseID,
-      },
-    ])
-    return
-  }
-
-  // Call the tool
-  try {
-    const generator = tool.call(normalizedInput as never, context, canUseTool)
-    for await (const result of generator) {
-      switch (result.type) {
-        case 'result':
-          logEvent('tengu_tool_use_success', {
-            messageID: assistantMessage.message.id,
-            toolName: tool.name,
-          })
-          yield createUserMessage(
-            [
-              {
-                type: 'tool_result',
-                content: result.resultForAssistant,
-                tool_use_id: toolUseID,
-              },
-            ],
-            {
-              data: result.data,
-              resultForAssistant: result.resultForAssistant,
-            },
-          )
-          return
-        case 'progress':
-          logEvent('tengu_tool_use_progress', {
-            messageID: assistantMessage.message.id,
-            toolName: tool.name,
-          })
-          yield createProgressMessage(
-            toolUseID,
-            siblingToolUseIDs,
-            result.content,
-            result.normalizedMessages,
-            result.tools,
-          )
-      }
-    }
-  } catch (error) {
-    const content = formatError(error)
-    logError(error)
-    logEvent('tengu_tool_use_error', {
-      error: content.slice(0, 2000),
-      messageID: assistantMessage.message.id,
-      toolName: tool.name,
-      toolInput: JSON.stringify(input).slice(0, 1000),
-    })
-    yield createUserMessage([
-      {
-        type: 'tool_result',
-        content,
-        is_error: true,
-        tool_use_id: toolUseID,
-      },
-    ])
-  }
-}
-
 function formatError(error: unknown): string {
   if (!(error instanceof Error)) {
     return String(error)
@@ -536,3 +579,14 @@ function formatError(error: unknown): string {
   const end = fullMessage.slice(-halfLength)
   return `${start}\n\n... [${fullMessage.length - 10000} characters truncated] ...\n\n${end}`
 }
+
+export type ToolUseContext = {
+  abortController: AbortController;
+  options: {
+    dangerouslySkipPermissions?: boolean;
+    tools: Tool[];
+    maxThinkingTokens?: number;
+    slowAndCapableModel?: string;
+  };
+  readFileTimestamps: Record<string, number>;
+};
