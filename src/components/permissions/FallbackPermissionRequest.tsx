@@ -19,6 +19,7 @@ import {
   UnaryEvent,
   usePermissionRequestLogging,
 } from '../../hooks/usePermissionRequestLogging.js'
+import { renderToolUseMessage } from '../../cli/renderers/toolRenderers'
 
 type Props = {
   toolUseConfirm: ToolUseConfirm
@@ -68,9 +69,10 @@ export function FallbackPermissionRequest({
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Text>
           {userFacingName}(
-          {toolUseConfirm.tool.renderToolUseMessage(
-            toolUseConfirm.input as never,
-            { verbose },
+          {renderToolUseMessage(
+            toolUseConfirm.tool.name,
+            toolUseConfirm.input,
+            verbose
           )}
           )
           {originalUserFacingName.endsWith(' (MCP)') ? (
@@ -111,7 +113,7 @@ export function FallbackPermissionRequest({
                     platform: env.platform,
                   },
                 })
-                toolUseConfirm.onAllow('temporary')
+                toolUseConfirm.onAllow('once')
                 onDone()
                 break
               case 'yes-dont-ask-again':

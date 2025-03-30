@@ -1,5 +1,5 @@
 import { ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import { Box, Newline, Static, useApp, useInput, useStdin } from 'ink'
+import { Box, Newline, Static, Text, useApp, useInput, useStdin } from 'ink'
 import ProjectOnboarding, {
   markProjectOnboardingComplete,
 } from '../ProjectOnboarding.js'
@@ -50,6 +50,9 @@ import {
   normalizeMessagesForAPI,
   processUserInput,
   reorderMessages,
+  createAssistantMessage,
+  createAssistantAPIErrorMessage,
+  createUserMessage,
 } from '../utils/messages.js'
 import { getSlowAndCapableModel, isDefaultSlowAndCapableModel } from '../utils/model'
 import { clearTerminal, updateTerminalTitle } from '../utils/terminal'
@@ -58,6 +61,10 @@ import { getMaxThinkingTokens } from '../utils/thinking'
 import { CliPermissionHandler } from '../cli/permissions/CliPermissionHandler'
 import { getOriginalCwd } from '../utils/state'
 import { getClients } from '../services/mcpClient.js'
+import { processInput, SessionState, CoreEvent } from '../core/ScriptaCore'
+import { IPermissionHandler, PermissionHandlerContext } from "../core/permissions/IPermissionHandler";
+import { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
+import { renderToolResultMessage } from '../cli/renderers/toolRenderers'
 
 type Props = {
   commands: Command[]
@@ -78,6 +85,50 @@ type Props = {
   isDefaultModel?: boolean
 }
 
+// --- Define PermissionRequest type locally --- 
+interface PermissionRequest {
+    toolName: string;
+    toolInput: any;
+    onAllow: () => void;
+    onDeny: () => void;
+}
+
+// --- Permission Prompt Component uses local type --- 
+interface PermissionPromptProps {
+    request: PermissionRequest;
+}
+
+function PermissionPrompt({ request }: PermissionPromptProps) {
+    const { exit } = useApp();
+    const [selection, setSelection] = useState<'allow' | 'deny' | null>(null);
+
+    useInput((input, key) => {
+        if (selection) return; // Already decided
+
+        if (input === 'y' || input === 'Y') {
+            setSelection('allow');
+            request.onAllow();
+        } else if (input === 'n' || input === 'N') {
+            setSelection('deny');
+            request.onDeny();
+        } else if (key.escape) {
+            setSelection('deny'); // Treat escape as deny
+            request.onDeny();
+        }
+    });
+
+    return (
+        <Box borderStyle="round" padding={1} flexDirection="column">
+            <Text bold color="yellow">Tool Request:</Text>
+            <Text>The assistant wants to use the tool: {request.toolName}</Text>
+            <Newline />
+            <Text>Allow? (y/n)</Text>
+            {selection === 'allow' && <>{' '}<Text color="green">(Allowed)</Text></>}
+            {selection === 'deny' && <>{' '}<Text color="red">(Denied)</Text></>}
+        </Box>
+    );
+}
+
 export function REPL({
   commands,
   dangerouslySkipPermissions,
@@ -94,6 +145,17 @@ export function REPL({
 }: Props): React.ReactNode {
   // TODO: probably shouldn't re-read config from file synchronously on every keystroke
   const verbose = verboseFromCLI ?? getGlobalConfig().verbose
+  
+  // --- Conditionally log based on verbosity ---
+  const conditionalLog = (message: string, data?: any) => {
+    if (verbose) {
+      if (data) {
+        console.log(message, data);
+      } else {
+        console.log(message);
+      }
+    }
+  };
 
   // Used to force the logo to re-render and conversation log to use a new file
   const [forkNumber, setForkNumber] = useState(
@@ -142,8 +204,20 @@ export function REPL({
   const [mcpClientState, setMcpClientState] = useState<WrappedClient[]>([]);
   const [isDefaultModelState, setIsDefaultModelState] = useState<boolean>(true);
 
-  // Instantiate the permission handler
-  const permissionHandler = useMemo(() => new CliPermissionHandler(setToolUseConfirm), []);
+  // Use local PermissionRequest type for state
+  const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
+
+  // Define coreEngineRef at the top level
+  const coreEngineRef = useRef<AsyncGenerator<CoreEvent, void, ToolResultBlockParam | undefined> | null>(null);
+
+  // MCP State & related hooks... (ensure these are declared before use)
+  // MCP State & related hooks... (ensure these are declared before use)
+
+  // Instantiate the permission handler (Uses the original state setters)
+  const permissionHandler = useMemo(() => new CliPermissionHandler(setToolUseConfirm, (req) => {
+    console.log(`[REPL] Setting permission request:`, req?.tool ? req.tool.name : null);
+    setPermissionRequest(req);
+  }), [setToolUseConfirm, setPermissionRequest]);
 
   // Effect to fetch logo data
   useEffect(() => {
@@ -262,37 +336,35 @@ export function REPL({
         return
       }
 
-      const [systemPrompt, context, model, maxThinkingTokens] =
-        await Promise.all([
-          getSystemPrompt(),
-          getContext(),
-          getSlowAndCapableModel(),
-          getMaxThinkingTokens([...messages, ...newMessages]),
-        ])
+      // Commenting out the old query loop as it conflicts with the new processInput flow
+      /*
+        const [systemPrompt, context, model, maxThinkingTokens] =
+          await Promise.all([
+            getSystemPrompt(),
+            getContext(),
+            getSlowAndCapableModel(),
+            getMaxThinkingTokens([...messages, ...newMessages]),
+          ])
 
-      for await (const message of query(
-        [...messages, ...newMessages],
-        systemPrompt,
-        context,
-        permissionHandler,
-        {
-          options: {
-            // commands,
-            // forkNumber,
-            // messageLogName,
-            tools,
-            slowAndCapableModel: model,
-            // verbose,
-            dangerouslySkipPermissions,
-            maxThinkingTokens,
+        for await (const message of query(
+          [...messages, ...newMessages],
+          systemPrompt,
+          context,
+          permissionHandler, // This handler might not be the correct type for the old query fn
+          {
+            options: {
+              tools,
+              slowAndCapableModel: model,
+              dangerouslySkipPermissions,
+              maxThinkingTokens,
+            },
+            readFileTimestamps: readFileTimestamps.current,
+            abortController,
           },
-          readFileTimestamps: readFileTimestamps.current,
-          abortController,
-        },
-        // getBinaryFeedbackResponse,
-      )) {
-        setMessages(oldMessages => [...oldMessages, message])
-      }
+        )) {
+          setMessages(oldMessages => [...oldMessages, message])
+        }
+      */
     } else {
       addToHistory(initialPrompt)
       // TODO: setHistoryIndex
@@ -305,66 +377,386 @@ export function REPL({
     setIsLoading(false)
   }
 
+  const handleCoreEvent = useCallback(async (coreEvent: CoreEvent, abortController: AbortController) => {
+         switch (coreEvent.type) {
+             case 'assistantResponse':
+                 conditionalLog("[REPL] Received assistantResponse:", coreEvent.text);
+                 const assistantMsg = createAssistantMessage(coreEvent.text);
+                 setMessages(oldMessages => [...oldMessages, assistantMsg]);
+                 return undefined; // No result to send back
+
+             case 'error':
+                 console.error("[REPL] Received error:", coreEvent.message, coreEvent.error);
+                 const errorMsg = createAssistantAPIErrorMessage(coreEvent.message);
+                 setMessages(oldMessages => [...oldMessages, errorMsg]);
+                 return undefined; // No result to send back
+
+             case 'toolRequest':
+                 console.log(`[REPL] Received toolRequest: ${coreEvent.toolName}`, {
+                    inputSize: typeof coreEvent.toolInput === 'string' ? 
+                      `${Math.min(coreEvent.toolInput.length, 30)} chars` + 
+                      (coreEvent.toolInput.length > 30 ? '...' : '') :
+                      'object',
+                    toolUseId: coreEvent.toolUseId // Log the tool use ID for tracing
+                 });
+
+                 // --- Actual Tool Execution Logic ---
+                 let toolResult: ToolResultBlockParam | undefined = undefined;
+                 const toolToUse = tools.find(t => t.name === coreEvent.toolName);
+
+                 if (!toolToUse) {
+                     // Construct result object directly
+                     toolResult = {
+                         type: 'tool_result',
+                         tool_use_id: coreEvent.toolUseId,
+                         content: `Error: Tool '${coreEvent.toolName}' not found. Available tools: ${tools.map(t => t.name).join(', ')}`,
+                         is_error: true,
+                     };
+                 } else {
+                     try {
+                         // Clone the abort controller to prevent accidental aborts
+                         const permissionContext: PermissionHandlerContext = { 
+                            abortController: new AbortController(), 
+                            options: { 
+                                dangerouslySkipPermissions: dangerouslySkipPermissions ?? false
+                            }
+                         };
+                         
+                         // Add event listener to propagate aborts from main controller to permission context
+                         abortController.signal.addEventListener('abort', () => {
+                            permissionContext.abortController.abort('Main flow aborted');
+                         });
+                         let granted = false;
+
+                         // 1. Check for existing permission first
+                         console.log(`[REPL] Checking permission for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
+                         granted = await permissionHandler.checkPermission(toolToUse, coreEvent.toolInput, permissionContext);
+
+                         // 2. If not granted, request it
+                         if (!granted) {
+                             console.log(`[REPL] No existing permission found. Requesting via handler for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
+                             // TODO: We need the assistantMessage that triggered this tool request
+                             //       to pass to the requestPermission method.
+                             //       For now, we might need a placeholder or to adjust the handler interface.
+                             //       Let's assume we can get it from the message history for now (requires finding it).
+                             const lastAssistantMessage = messages.slice().reverse().find(m => m.type === 'assistant') as AssistantMessage | undefined;
+                             // We'll let the PermissionHandler handle null values now, so no need to throw an error
+                             
+                             granted = await permissionHandler.requestPermission(
+                                 toolToUse,
+                                 coreEvent.toolInput,
+                                 permissionContext,
+                                 lastAssistantMessage // Pass the found message, which might be undefined
+                             );
+                         }
+
+                         if (granted) {
+                             conditionalLog(`[REPL] Permission granted. Calling tool: ${coreEvent.toolName}`);
+                             
+                             // Add feedback message to UI confirming permission was granted
+                             const permissionGrantedMsg = {
+                                 type: 'assistant',
+                                 message: {
+                                     id: `permission-granted-${Date.now()}`,
+                                     role: 'assistant',
+                                     content: [{ 
+                                         type: 'text', 
+                                         text: `Permission granted for ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
+                                     }]
+                                 },
+                                 // Ensure the dot shows by setting metadata needed for dot display
+                                 isSuccessMessage: true,
+                                 durationMs: 0,
+                                 costUSD: 0
+                             };
+                             setMessages(oldMessages => [...oldMessages, permissionGrantedMsg]);
+                             
+                             const output = await toolToUse.call(
+                                coreEvent.toolInput,
+                                { 
+                                   abortController,
+                                   options: {
+                                     dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
+                                     forkNumber,
+                                     messageLogName,
+                                     verbose: false
+                                   },
+                                   readFileTimestamps: {}
+                                }
+                             );
+                             conditionalLog(`[REPL] Tool ${coreEvent.toolName} finished. Raw Output Type:`, typeof output);
+
+                             // Format the result - Handle AsyncGenerator specifically
+                             let resultContent: string;
+                             let toolResultObject: any = null; // For preserving object structure
+                             
+                             const isAsyncGenerator = (val: any): val is AsyncGenerator => {
+                                return typeof val === 'object' && val !== null && typeof val[Symbol.asyncIterator] === 'function';
+                             };
+
+                             if (isAsyncGenerator(output)) {
+                                // Just log that we're processing an AsyncGenerator without details
+                                conditionalLog(`[REPL] Processing AsyncGenerator output for ${coreEvent.toolName}...`);
+                                let accumulatedContent = "";
+                                let resultObjects: any[] = [];
+                                
+                                try {
+                                    for await (const value of output) {
+                                        // Store original objects for LLM
+                                        if (typeof value === 'object' && value !== null) {
+                                            resultObjects.push(value);
+                                        }
+                                        
+                                        // Format for display
+                                        if (typeof value === 'object' && value !== null) {
+                                            try {
+                                                // For final results with type and data
+                                                if (value.type === 'result' && value.data) {
+                                                    const formattedResult = JSON.stringify(value.data, null, 2);
+                                                    accumulatedContent += formattedResult;
+                                                } else {
+                                                    // Generic object serialization
+                                                    accumulatedContent += JSON.stringify(value, null, 2);
+                                                }
+                                            } catch (e) {
+                                                console.error(`[REPL] Error serializing tool output:`, e);
+                                                accumulatedContent += `[Complex Object]`;
+                                            }
+                                        } else {
+                                            // Append string values as before
+                                            accumulatedContent += String(value);
+                                        }
+                                    }
+                                    
+                                    resultContent = accumulatedContent;
+                                    
+                                    // If we collected objects, use the last one (or all combined for some tools)
+                                    if (resultObjects.length > 0) {
+                                        if (resultObjects.length === 1) {
+                                            toolResultObject = resultObjects[0];
+                                        } else {
+                                            // For tools that yield multiple objects, use the last with 'result' type if available
+                                            const resultObj = resultObjects.find(obj => obj.type === 'result');
+                                            if (resultObj) {
+                                                toolResultObject = resultObj;
+                                            } else {
+                                                // Otherwise use the last object
+                                                toolResultObject = resultObjects[resultObjects.length - 1];
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Use proper tool rendering instead of plain text
+                                    // Create a user tool result message that will render properly
+                                    const toolData = toolResultObject?.data || toolResultObject || { content: resultContent };
+                                    
+                                    // Create a message structure that will be properly rendered by the Message component
+                                    const toolOutputMessage = {
+                                        type: 'user',
+                                        message: {
+                                            id: `tool-output-${coreEvent.toolUseId}`,
+                                            role: 'user',
+                                            content: [
+                                                {
+                                                    type: 'tool_result',
+                                                    tool_use_id: coreEvent.toolUseId,
+                                                    content: resultContent,
+                                                    name: coreEvent.toolName // Important: include the tool name
+                                                }
+                                            ]
+                                        },
+                                        // Add toolUseResult for UserToolSuccessMessage component
+                                        toolUseResult: {
+                                            data: toolData,
+                                            tool_use_id: coreEvent.toolUseId
+                                        }
+                                    };
+                                    
+                                    // Debug log what's being rendered - but truncate long content
+                                    conditionalLog(`[REPL] Tool output message for ${coreEvent.toolName}:`, {
+                                        type: toolOutputMessage.type,
+                                        id: toolOutputMessage.message.id,
+                                        contentType: toolOutputMessage.message.content[0]?.type,
+                                        // Only log brief info about content, not the full content
+                                        contentSize: typeof resultContent === 'string' ? 
+                                            `${resultContent.length} chars` : 'object'
+                                    });
+                                    
+                                    // Add the properly structured message to be rendered
+                                    setMessages(oldMessages => [...oldMessages, toolOutputMessage]);
+                                    
+                                    // Log brief summary instead of full content
+                                    conditionalLog(`[REPL] Tool ${coreEvent.toolName} result summary:`, {
+                                        size: typeof resultContent === 'string' ? resultContent.length : 'object',
+                                        objectType: toolResultObject ? typeof toolResultObject : 'none'
+                                    });
+                                } catch (genError) {
+                                     console.error(`[REPL] Error consuming generator for ${coreEvent.toolName}:`, genError);
+                                     resultContent = `[Error consuming tool generator: ${genError instanceof Error ? genError.message : String(genError)}]`;
+                                }
+                             } else if (typeof output === 'string') {
+                                 resultContent = output;
+                             } else if (typeof output === 'object' && output !== null) {
+                                 try {
+                                     resultContent = JSON.stringify(output, null, 2);
+                                     toolResultObject = output; // Save the original object
+                                 } catch (e) {
+                                     console.error(`[REPL] Error stringifying tool output for ${coreEvent.toolName}:`, e);
+                                     resultContent = `[Error: Could not serialize tool output]`;
+                                 }
+                             } else {
+                                 resultContent = String(output);
+                             }
+
+                             // Use resultForAssistant if available
+                             const finalContent = toolResultObject?.resultForAssistant || resultContent;
+                             
+                             toolResult = {
+                                type: 'tool_result',
+                                tool_use_id: coreEvent.toolUseId,
+                                content: finalContent,
+                                // Include original data object for LLM if available
+                                data: toolResultObject || undefined,
+                                is_error: false
+                             };
+
+                         } else {
+                             conditionalLog(`[REPL] Permission denied for tool: ${coreEvent.toolName}`);
+                             
+                             // Add feedback message for denying permission with an error dot
+                             const permissionDeniedMsg = {
+                                 type: 'assistant',
+                                 message: {
+                                     id: `permission-denied-${Date.now()}`,
+                                     role: 'assistant',
+                                     content: [{ 
+                                         type: 'text', 
+                                         text: `User rejected ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
+                                     }]
+                                 },
+                                 // Ensure the red error dot shows
+                                 isErrorMessage: true,
+                                 durationMs: 0,
+                                 costUSD: 0
+                             };
+                             setMessages(oldMessages => [...oldMessages, permissionDeniedMsg]);
+                             
+                             // Construct result object directly
+                             toolResult = {
+                                 type: 'tool_result',
+                                 tool_use_id: coreEvent.toolUseId,
+                                 content: `Permission denied by user for tool: ${coreEvent.toolName}`,
+                                 is_error: true
+                             };
+                         }
+                     } catch (error: any) {
+                         console.error(`[REPL] Error executing tool ${coreEvent.toolName}:`, error);
+                         let errorMessage = `Error executing tool: ${coreEvent.toolName}.`;
+                         if (error instanceof Error) {
+                            errorMessage += ` ${error.message}`;
+                         }
+                         // TODO: Potentially extract more specific error info
+                         // Construct result object directly
+                         toolResult = {
+                             type: 'tool_result',
+                             tool_use_id: coreEvent.toolUseId,
+                             content: errorMessage, // Use the determined errorMessage
+                             is_error: true
+                         };
+                     }
+                 }
+                 // --- End Actual Tool Execution Logic ---
+
+                 conditionalLog(`[REPL] Sending result for ${coreEvent.toolUseId}:`, {
+                    type: toolResult?.type,
+                    tool_use_id: toolResult?.tool_use_id,
+                    is_error: toolResult?.is_error,
+                    contentSize: typeof toolResult?.content === 'string' ? 
+                        `${Math.min(toolResult.content.length, 50)} chars` + 
+                        (toolResult.content.length > 50 ? '...' : '') : 'object',
+                    hasData: toolResult?.data ? 'yes' : 'no'
+                 });
+                 return toolResult; // Send the actual result (or error) back
+
+             default:
+                 conditionalLog("[REPL] Received unknown CoreEvent type:", (coreEvent as any)?.type);
+                 return undefined;
+         }
+     }, [tools, permissionHandler, dangerouslySkipPermissions, setMessages]); // Added dependencies
+
   async function onQuery(
     newMessages: MessageType[],
     abortController: AbortController,
   ) {
     setMessages(oldMessages => [...oldMessages, ...newMessages])
-
-    // Mark onboarding as complete when any user message is sent to Claude
     markProjectOnboardingComplete()
-
-    // The last message is an assistant message if the user input was a bash command,
-    // or if the user input was an invalid slash command.
+    
     const lastMessage = newMessages[newMessages.length - 1]!
+    // Check if lastMessage is UserMessage before accessing .message
+    const userInput = 
+      lastMessage?.type === 'user' && typeof lastMessage.message.content === 'string' 
+      ? lastMessage.message.content 
+      : ""; // Default to empty string if not a user text message
 
-    // Update terminal title based on user message
-    if (
-      lastMessage.type === 'user' &&
-      typeof lastMessage.message.content === 'string'
-    ) {
-     // updateTerminalTitle(lastMessage.message.content)
-    }
     if (lastMessage.type === 'assistant') {
+      // Handle cases where input processing already yielded an assistant message (e.g., bash cd)
       setAbortController(null)
       setIsLoading(false)
       return
     }
-
-    const [systemPrompt, context, model, maxThinkingTokens] = await Promise.all(
-      [
-        getSystemPrompt(),
-        getContext(),
-        getSlowAndCapableModel(),
-        getMaxThinkingTokens([...messages, lastMessage]),
-      ],
-    )
-
-    // query the API
-    for await (const message of query(
-      [...messages, lastMessage],
-      systemPrompt,
-      context,
-      permissionHandler,
-      {
-        options: {
-          // commands,
-          // forkNumber,
-          // messageLogName,
-          tools,
-          slowAndCapableModel: model,
-          // verbose,
-          dangerouslySkipPermissions,
-          maxThinkingTokens,
-        },
-        readFileTimestamps: readFileTimestamps.current,
-        abortController,
-      },
-      // getBinaryFeedbackResponse,
-    )) {
-      setMessages(oldMessages => [...oldMessages, message])
+    if (userInput === "") {
+        // Handle cases where the input wasn't a user text message (e.g. tool result, progress)
+        console.warn("[REPL] onQuery called without user text input.");
+        setIsLoading(false);
+        setAbortController(null);
+        return;
     }
-    setIsLoading(false)
+
+    setIsLoading(true);
+
+    try {
+      const currentSessionState: SessionState = {
+        messages: [...messages, ...newMessages], // Pass current messages
+        currentWorkingDirectory: getOriginalCwd(), // Get current CWD
+        tools: tools, // Pass tools from props
+        config: {
+           dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
+           // maxThinkingTokens: await getMaxThinkingTokens(...), // TODO: Get max tokens if needed by core
+           // slowAndCapableModel: await getSlowAndCapableModel(), // TODO: Get model if needed by core
+           // primaryProvider: getGlobalConfig().primaryProvider, // TODO: Get provider if needed
+        }
+      };
+
+      // Call processInput WITHOUT abortController argument
+      coreEngineRef.current = processInput(userInput, currentSessionState);
+
+      let nextToolResult: ToolResultBlockParam | undefined = undefined;
+      while (true) {
+          if (!coreEngineRef.current) break; // Guard against null ref
+          const { value: coreEvent, done } = await coreEngineRef.current.next(nextToolResult);
+          nextToolResult = undefined;
+
+          if (done) {
+              conditionalLog("[REPL] Core engine processing finished.");
+              break;
+          }
+
+          if (coreEvent) {
+              nextToolResult = await handleCoreEvent(coreEvent, abortController);
+          } else {
+               conditionalLog("[REPL] Received undefined event from core generator.");
+          }
+      }
+
+    } catch (error) {
+        console.error("[REPL] Unhandled error during core processing:", error);
+        const errorMsg = createAssistantAPIErrorMessage("An unexpected error occurred.");
+        setMessages(oldMessages => [...oldMessages, errorMsg]);
+    } finally {
+        setIsLoading(false);
+        setAbortController(null); // Clear abort controller when done
+        coreEngineRef.current = null; // Clear the generator ref
+    }
   }
 
   // Register cost summary tracker
@@ -415,25 +807,27 @@ export function REPL({
     [normalizedMessages],
   )
 
+  // Ensure messagesJSX is correctly formed before use
   const messagesJSX = useMemo(() => {
-    return [
+    const currentMcpClients = mcpClientState ?? [];
+    const currentIsDefaultModel = isDefaultModelState ?? true;
+    const currentNormalizedMessages = normalizedMessages || [];
+
+    const staticPart = [
       {
-        type: 'static',
+        type: 'static' as const,
         jsx: (
           <Box flexDirection="column" key={`logo${forkNumber}`}>
-            <Logo mcpClients={mcpClientState} isDefaultModel={isDefaultModelState} />
+            <Logo mcpClients={currentMcpClients} isDefaultModel={currentIsDefaultModel} />
             <ProjectOnboarding workspaceDir={getOriginalCwd()} />
           </Box>
         ),
       },
-      ...reorderMessages(normalizedMessages).map(_ => {
+      ...reorderMessages(currentNormalizedMessages).map(_ => {
         const toolUseID = getToolUseID(_)
         const message =
           _.type === 'progress' ? (
             _.content.message.content[0]?.type === 'text' &&
-            // Hack: AgentTool interrupts use Progress messages, so don't
-            // need an extra ⎿ because <Message /> already adds one.
-            // TODO: Find a cleaner way to do this.
             _.content.message.content[0].text === INTERRUPT_MESSAGE ? (
               <Message
                 message={_.content}
@@ -449,7 +843,7 @@ export function REPL({
                 shouldShowDot={false}
               />
             ) : (
-              <MessageResponse children={
+              <MessageResponse children={ 
                 <Message
                   message={_.content}
                   messages={_.normalizedMessages}
@@ -472,31 +866,31 @@ export function REPL({
           ) : (
             <Message
               message={_}
-              messages={normalizedMessages}
+              messages={currentNormalizedMessages}
               addMargin={true}
               tools={tools}
               verbose={verbose}
               debug={debug}
-              erroredToolUseIDs={erroredToolUseIDs}
-              inProgressToolUseIDs={inProgressToolUseIDs}
+              erroredToolUseIDs={erroredToolUseIDs ?? new Set()}
+              inProgressToolUseIDs={inProgressToolUseIDs ?? new Set()}
               shouldAnimate={
                 !toolJSX &&
                 !toolUseConfirm &&
                 !isMessageSelectorVisible &&
-                (!toolUseID || inProgressToolUseIDs.has(toolUseID))
+                (!toolUseID || (inProgressToolUseIDs ?? new Set()).has(toolUseID))
               }
               shouldShowDot={true}
-              unresolvedToolUseIDs={unresolvedToolUseIDs}
+              unresolvedToolUseIDs={unresolvedToolUseIDs ?? new Set()}
             />
-          )
+          );
 
         const type = shouldRenderStatically(
           _,
-          normalizedMessages,
-          unresolvedToolUseIDs,
+          currentNormalizedMessages,
+          unresolvedToolUseIDs ?? new Set(),
         )
           ? 'static'
-          : 'transient'
+          : 'transient';
 
         if (debug) {
           return {
@@ -523,61 +917,43 @@ export function REPL({
           ),
         }
       }),
-    ]
+    ];
+    return staticPart;
   }, [
-    forkNumber,
-    normalizedMessages,
-    tools,
-    verbose,
-    debug,
-    erroredToolUseIDs,
-    inProgressToolUseIDs,
-    toolJSX,
-    toolUseConfirm,
-    isMessageSelectorVisible,
-    unresolvedToolUseIDs,
-    mcpClientState,
-    isDefaultModelState,
-  ])
+    // Keep full dependencies
+    forkNumber, normalizedMessages, tools, verbose, debug, erroredToolUseIDs, 
+    inProgressToolUseIDs, toolJSX, toolUseConfirm, isMessageSelectorVisible, 
+    unresolvedToolUseIDs, mcpClientState, isDefaultModelState
+  ]);
 
   // only show the dialog once not loading
   const showingCostDialog = !isLoading && showCostDialog
 
+  // Remove fallback `|| []` - messagesJSX should now always be an array
+  const staticMessagesJSX = useMemo(() => messagesJSX.filter(_ => _.type === 'static').map(item => item.jsx), [messagesJSX]);
+  const transientMessagesJSX = useMemo(() => messagesJSX.filter(_ => _.type === 'transient').map(item => item.jsx), [messagesJSX]);
+
   return (
-    <>
-      <Static
-        items={messagesJSX.filter(_ => _.type === 'static')}
-      >
-        {(item: { jsx: React.ReactNode }) => item.jsx}
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Use the render prop function and suppress potential type error */}
+      {/* @ts-ignore - Linter seems incorrect about Static prop types here */}
+      <Static items={staticMessagesJSX}>
+          {(jsxItem, index) => <Box key={index}>{jsxItem}</Box>}
       </Static>
-      {messagesJSX.filter(_ => _.type === 'transient').map(_ => _.jsx)}
+      {/* Map over transient messages */} 
+      {transientMessagesJSX.map((jsx, index) => <Box key={(jsx as any)?.key ?? index}>{jsx}</Box>)}
+      
       <Box
         borderColor="red"
         borderStyle={debug ? 'single' : undefined}
         flexDirection="column"
         width="100%"
       >
-        {!toolJSX && !toolUseConfirm && !binaryFeedbackContext && isLoading && (
+        {/* Show a single spinner when loading */}
+        {isLoading && !toolJSX && !toolUseConfirm && !binaryFeedbackContext && (
           <Spinner />
         )}
         {toolJSX ? toolJSX.jsx : null}
-        {/* {!toolJSX && binaryFeedbackContext && !isMessageSelectorVisible && (
-          <BinaryFeedback
-            m1={binaryFeedbackContext.m1}
-            m2={binaryFeedbackContext.m2}
-            resolve={result => {
-              binaryFeedbackContext.resolve(result)
-              setTimeout(() => setBinaryFeedbackContext(null), 0)
-            }}
-            verbose={verbose}
-            normalizedMessages={normalizedMessages}
-            tools={tools}
-            debug={debug}
-            erroredToolUseIDs={erroredToolUseIDs}
-            inProgressToolUseIDs={inProgressToolUseIDs}
-            unresolvedToolUseIDs={unresolvedToolUseIDs}
-          />
-        )} */}
         {!toolJSX &&
           toolUseConfirm &&
           !isMessageSelectorVisible &&
@@ -607,45 +983,51 @@ export function REPL({
             />
           )}
 
-        {!toolUseConfirm &&
-          !toolJSX?.shouldHidePromptInput &&
-          shouldShowPromptInput &&
-          !isMessageSelectorVisible &&
-          !binaryFeedbackContext &&
-          !showingCostDialog && (
-            <>
+        {/* Conditionally render PermissionPrompt */} 
+        {permissionRequest && (
+            <PermissionPrompt request={permissionRequest} />
+        )}
+
+        {/* Conditionally render PromptInput, disabling if permissionRequest is active */}
+        <Box flexDirection="column">
+            {!toolUseConfirm &&
+              !toolJSX?.shouldHidePromptInput &&
+              shouldShowPromptInput &&
+              !isMessageSelectorVisible &&
+              !binaryFeedbackContext &&
+              !showingCostDialog && (
               <PromptInput
-                commands={commands}
-                forkNumber={forkNumber}
-                messageLogName={messageLogName}
-                tools={tools}
-                isDisabled={false}
-                isLoading={isLoading}
-                onQuery={onQuery}
-                debug={debug}
-                verbose={verbose}
-                messages={messages}
-                setToolJSX={setToolJSX}
-                onAutoUpdaterResult={setAutoUpdaterResult}
-                autoUpdaterResult={autoUpdaterResult}
-                input={inputValue}
-                onInputChange={setInputValue}
-                mode={inputMode}
-                onModeChange={setInputMode}
-                submitCount={submitCount}
-                onSubmitCountChange={setSubmitCount}
-                setIsLoading={setIsLoading}
-                setAbortController={setAbortController}
-                onShowMessageSelector={() =>
-                  setIsMessageSelectorVisible(prev => !prev)
-                }
-                setForkConvoWithMessagesOnTheNextRender={
-                  setForkConvoWithMessagesOnTheNextRender
-                }
-                readFileTimestamps={readFileTimestamps.current}
+                  commands={commands}
+                  forkNumber={forkNumber}
+                  messageLogName={messageLogName}
+                  tools={tools}
+                  isDisabled={isLoading || !!permissionRequest} // Disable input during loading OR permission request
+                  isLoading={isLoading}
+                  onQuery={onQuery}
+                  debug={debug}
+                  verbose={verbose}
+                  messages={messages}
+                  setToolJSX={setToolJSX}
+                  onAutoUpdaterResult={setAutoUpdaterResult}
+                  autoUpdaterResult={autoUpdaterResult}
+                  input={inputValue}
+                  onInputChange={setInputValue}
+                  mode={inputMode}
+                  onModeChange={setInputMode}
+                  submitCount={submitCount}
+                  onSubmitCountChange={setSubmitCount}
+                  setIsLoading={setIsLoading}
+                  setAbortController={setAbortController}
+                  onShowMessageSelector={() =>
+                    setIsMessageSelectorVisible(prev => !prev)
+                  }
+                  setForkConvoWithMessagesOnTheNextRender={
+                    setForkConvoWithMessagesOnTheNextRender
+                  }
+                  readFileTimestamps={readFileTimestamps.current}
               />
-            </>
           )}
+        </Box>
       </Box>
       {isMessageSelectorVisible && (
         <MessageSelector
@@ -687,7 +1069,7 @@ export function REPL({
       )}
       {/** Fix occasional rendering artifact */}
       <Newline />
-    </>
+    </Box>
   )
 }
 

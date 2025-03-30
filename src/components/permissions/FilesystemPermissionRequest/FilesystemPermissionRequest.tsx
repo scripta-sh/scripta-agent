@@ -32,6 +32,7 @@ import {
   toAbsolutePath,
 } from '../../../utils/permissions/filesystem.js'
 import { getCwd } from '../../../utils/state'
+import { renderToolUseMessage } from '../../../cli/renderers/toolRenderers'
 
 function pathArgNameForToolUse(toolUseConfirm: ToolUseConfirm): string | null {
   switch (toolUseConfirm.tool) {
@@ -169,9 +170,10 @@ function FilesystemPermissionRequestImpl({
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Text>
           {userFacingName}(
-          {toolUseConfirm.tool.renderToolUseMessage(
-            toolUseConfirm.input as never,
-            { verbose },
+          {renderToolUseMessage(
+            toolUseConfirm.tool.name,
+            toolUseConfirm.input,
+            verbose
           )}
           )
         </Text>
@@ -203,7 +205,7 @@ function FilesystemPermissionRequestImpl({
                     platform: env.platform,
                   },
                 })
-                toolUseConfirm.onAllow('temporary')
+                toolUseConfirm.onAllow('once')
                 onDone()
                 break
               case 'yes-dont-ask-again':

@@ -70,11 +70,11 @@ const MESSAGES = [
   'Working',
 ]
 
-export function Spinner(): React.ReactNode {
+export function Spinner({ label }: { label?: string }): React.ReactNode {
   const frames = [...CHARACTERS, ...[...CHARACTERS].reverse()]
   const [frame, setFrame] = useState(0)
   const [elapsedTime, setElapsedTime] = useState(0)
-  const message = useRef(sample(MESSAGES))
+  const message = useRef(label || sample(MESSAGES))
   const startTime = useRef(Date.now())
 
   useEffect(() => {

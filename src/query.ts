@@ -590,3 +590,6 @@ export type ToolUseContext = {
   };
   readFileTimestamps: Record<string, number>;
 };
+
+// Export necessary types and functions
+export type { Message, UserMessage, AssistantMessage, ProgressMessage, createUserMessage, query }

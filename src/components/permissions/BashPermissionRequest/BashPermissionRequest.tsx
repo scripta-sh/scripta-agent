@@ -13,6 +13,7 @@ import { PermissionRequestTitle } from '../PermissionRequestTitle'
 import { logUnaryPermissionEvent } from '../utils'
 import { Select } from '../../CustomSelect/select'
 import { toolUseOptions } from '../toolUseOptions'
+import { renderToolUseMessage } from '../../../cli/renderers/toolRenderers'
 
 type Props = {
   toolUseConfirm: ToolUseConfirm
@@ -50,7 +51,7 @@ export function BashPermissionRequest({
         riskScore={toolUseConfirm.riskScore}
       />
       <Box flexDirection="column" paddingX={2} paddingY={1}>
-        <Text>{BashTool.renderToolUseMessage({ command })}</Text>
+        <Text>{renderToolUseMessage('Bash', { command }, false)}</Text>
         <Text color={theme.secondaryText}>{toolUseConfirm.description}</Text>
       </Box>
 
@@ -66,7 +67,7 @@ export function BashPermissionRequest({
                   toolUseConfirm,
                   'accept',
                 )
-                toolUseConfirm.onAllow('temporary')
+                toolUseConfirm.onAllow('once')
                 onDone()
                 break
               case 'yes-dont-ask-again-prefix': {

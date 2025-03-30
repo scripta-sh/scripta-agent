@@ -14,6 +14,7 @@ import { logError } from './utils/log'
 import { grantWritePermissionForOriginalDir } from './utils/permissions/filesystem'
 import { getCwd } from './utils/state'
 import { PRODUCT_NAME } from './constants/product'
+import { renderToolUseMessage } from './cli/renderers/toolRenderers'
 
 // Commands that are known to be safe for execution
 const SAFE_COMMANDS = new Set([
@@ -261,7 +262,7 @@ function getPermissionKey(
       if (prefix) {
         return `${BashTool.name}(${prefix}:*)`
       }
-      return `${BashTool.name}(${BashTool.renderToolUseMessage(input as never)})`
+      return `${BashTool.name}(${renderToolUseMessage('Bash', input, false)})`
     default:
       return tool.name
   }

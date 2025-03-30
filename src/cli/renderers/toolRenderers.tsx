@@ -12,7 +12,11 @@ import { getCwd } from '../../utils/state';
 import { intersperse } from '../../utils/array';
 import { applyMarkdown } from '../../utils/markdown';
 import { Hunk } from 'diff';
-import { OutputLine } from '../../tools/BashTool/OutputLine'; // Keep relative path for now
+import { OutputLine } from '../../tools/BashTool/OutputLine';
+import { applyEdit } from '../../tools/FileEditTool/utils';
+import { getPatch } from '../../utils/diff';
+import { existsSync, readFileSync } from 'fs';
+import { detectFileEncoding } from '../../utils/file';
 
 // TODO: Define proper types for the 'data' parameter for each tool's output
 // TODO: Define proper types for the 'input' parameter for each tool's input
@@ -418,10 +422,8 @@ export function renderToolUseRejectedMessage(toolName: string, input: any, conte
     switch (toolName) {
         case 'Edit': // FileEditTool
             try {
-              // Attempting to replicate original logic - needs applyEdit and Hunk type
-              // const { patch } = applyEdit(input.file_path, input.old_string, input.new_string);
-              // Placeholder:
-              const patch: Hunk[] = []; // Need to import Hunk and potentially applyEdit
+              // Get the patch for displaying the rejected changes
+              const { patch } = applyEdit(input.file_path, input.old_string, input.new_string);
               return (
                 <Box flexDirection="column">
                   <Text>
@@ -459,14 +461,31 @@ export function renderToolUseRejectedMessage(toolName: string, input: any, conte
 
         case 'Replace': // FileWriteTool
              try {
-                // Attempting to replicate - needs getPatch, Hunk
-                 const fullFilePath = input.file_path.startsWith('/') ? input.file_path : `${getCwd()}/${input.file_path}`; // Simple absolute path logic
-                // const oldFileExists = existsSync(fullFilePath); // Requires fs access
-                // const enc = oldFileExists ? detectFileEncoding(fullFilePath) : 'utf-8'; // Requires utils
-                // const oldContent = oldFileExists ? readFileSync(fullFilePath, enc) : null; // Requires fs
-                 const type = 'update'; // Assuming update for now
-                // const patch = getPatch({ filePath: input.file_path, fileContents: oldContent ?? '', oldStr: oldContent ?? '', newStr: input.content }); // Requires utils
-                 const patch: Hunk[] = []; // Placeholder
+                // Get full file path
+                const fullFilePath = input.file_path.startsWith('/') ? input.file_path : `${getCwd()}/${input.file_path}`;
+                const oldFileExists = existsSync(fullFilePath);
+                const type = oldFileExists ? 'update' : 'create';
+                
+                // Generate patch
+                let patch: Hunk[] = [];
+                if (oldFileExists) {
+                    const enc = detectFileEncoding(fullFilePath);
+                    const oldContent = readFileSync(fullFilePath, enc);
+                    patch = getPatch({ 
+                        filePath: input.file_path, 
+                        fileContents: oldContent.toString(), 
+                        oldStr: oldContent.toString(), 
+                        newStr: input.content 
+                    });
+                } else {
+                    // For new files, create patch showing entire content as added
+                    patch = getPatch({ 
+                        filePath: input.file_path, 
+                        fileContents: '', 
+                        oldStr: '', 
+                        newStr: input.content 
+                    });
+                }
                 return (
                     <Box flexDirection="column">
                         <Text>

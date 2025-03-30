@@ -120,7 +120,7 @@ export function FileEditPermissionRequest({
                 // Note: We call onDone before onAllow to hide the
                 // permission request before we render the next message
                 onDone()
-                toolUseConfirm.onAllow('temporary')
+                toolUseConfirm.onAllow('once')
                 break
               case 'yes-dont-ask-again':
                 extractLanguageName(file_path).then(language => {
