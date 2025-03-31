@@ -247,7 +247,7 @@ function convertAnthropicMessagesToOpenAIMessages(messages: (UserMessage | Assis
               id: block.id,
             }],
           })
-      } if(block.type === 'tool_result') {
+      } else if(block.type === 'tool_result') {
         toolResults[block.tool_use_id] = {
           role: 'tool',
           content: block.content,
@@ -451,10 +451,6 @@ export function getAnthropicClient(model?: string, customApiKey?: string): Anthr
     'x-app': 'cli',
     'User-Agent': USER_AGENT,
   }
-  if (process.env.ANTHROPIC_AUTH_TOKEN) {
-    defaultHeaders['Authorization'] =
-      `Bearer ${process.env.ANTHROPIC_AUTH_TOKEN}`
-  }
 
   const ARGS = {
     defaultHeaders,
@@ -479,10 +475,10 @@ export function getAnthropicClient(model?: string, customApiKey?: string): Anthr
   // Use provided custom API key or fall back to configured key
   const apiKey = customApiKey || getAnthropicApiKey()
 
-  if (process.env.USER_TYPE === 'ant' && !apiKey) {
+  if (!apiKey) {
     console.error(
       chalk.red(
-        '[ANT-ONLY] Please set the ANTHROPIC_API_KEY environment variable to use the CLI. To create a new key, go to https://console.anthropic.com/settings/keys.',
+        'No Anthropic API key configured. Please set up your API key using the /model command.',
       ),
     )
   }
@@ -633,6 +629,9 @@ export async function queryAnthropicModel(
   // Use the configuration from utils/config for the provider
   const config = getGlobalConfig();
   const provider = config.primaryProvider;
+  const modelName = options?.model || config.largeModelName;
+  
+  console.log(`Using provider ${provider} with model ${modelName}`);
   
   // For OpenAI, Mistral, or other providers, use the respective query function
   if (provider !== 'anthropic') {
@@ -643,7 +642,10 @@ export async function queryAnthropicModel(
       maxThinkingTokens,
       tools,
       signal || new AbortController().signal,
-      options,
+      {
+        ...options,
+        model: modelName, // Ensure we're using the right model name
+      },
     );
   }
   
@@ -1047,9 +1049,12 @@ export async function queryHaiku({
   const provider = config.primaryProvider || 'anthropic'
   const smallModel = config.smallModelName || SMALL_FAST_MODEL
   
+  console.log(`queryHaiku using provider: ${provider} with model: ${smallModel}`)
+  
   // For non-Anthropic providers, use the OpenAI-compatible interface
   if (provider !== 'anthropic') {
     try {
+      // Use the appropriate base URL based on provider
       const response = await getCompletion('small', {
         model: smallModel,
         messages: [

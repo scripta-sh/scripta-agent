@@ -2,7 +2,7 @@
 
 // Define required types from other modules (will need adjustment)
 import { Message, UserMessage, AssistantMessage } from '../query'; // Assuming Message types from query.ts
-import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage } from '../utils/messages.js';
+import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage, CANCEL_MESSAGE } from '../utils/messages.js';
 import { Tool } from '../Tool';
 import { getContext } from '../context'; // For generating context string
 import { formatSystemPromptWithContext } from '../services/claude'; // <-- Correct path, no extension
@@ -220,9 +220,19 @@ export async function* processInput(
                         is_error: toolResult.is_error,
                         contentSize: typeof toolResult.content === 'string' ?
                             `${Math.min(toolResult.content.length, 30)} chars` +
-                            (toolResult.content.length > 30 ? '...' : '') : 'object',
-                        hasData: toolResult.data ? 'yes' : 'no'
+                            (toolResult.content.length > 30 ? '...' : '') : 'object'
                     });
+                    
+                    // If the tool result indicates an error due to permission denial, exit without making more API calls
+                    // For other errors (technical failures), we should still pass the error back to the LLM
+                    if (toolResult.is_error && 
+                        (toolResult.content.includes('Permission denied') || 
+                         toolResult.content === CANCEL_MESSAGE)) {
+                        conditionalLog(`[ScriptaCore] Tool permission was denied for ${block.id}. Skipping further LLM calls.`);
+                        // Just exit without sending a message - let the UI show just the rejection
+                        return; // Exit the generator entirely
+                    }
+                    
                     toolResults.push(toolResult);
                 } else {
                     // Handle case where caller didn't provide a result (e.g., user cancel)
@@ -310,9 +320,19 @@ export async function* processInput(
                                         is_error: toolResult.is_error,
                                         contentSize: typeof toolResult.content === 'string' ?
                                             `${Math.min(toolResult.content.length, 30)} chars` +
-                                            (toolResult.content.length > 30 ? '...' : '') : 'object',
-                                        hasData: toolResult.data ? 'yes' : 'no'
+                                            (toolResult.content.length > 30 ? '...' : '') : 'object'
                                     });
+                                    
+                                    // If the tool result indicates an error due to permission denial, exit without making more API calls
+                                    // For other errors (technical failures), we should still pass the error back to the LLM
+                                    if (toolResult.is_error && 
+                                        (toolResult.content.includes('Permission denied') || 
+                                         toolResult.content === CANCEL_MESSAGE)) {
+                                        conditionalLog(`[ScriptaCore] Tool permission was denied for ${block.id}. Skipping further LLM calls.`);
+                                        // Just exit without sending a message - let the UI show just the rejection
+                                        return; // Exit the generator entirely
+                                    }
+                                    
                                     currentToolResults.push(toolResult);
                                 } else {
                                     // Handle case where caller didn't provide a result

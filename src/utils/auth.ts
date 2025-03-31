@@ -2,12 +2,10 @@ import { USE_BEDROCK, USE_VERTEX } from './model'
 import { getGlobalConfig } from './config'
 
 export function isAnthropicAuthEnabled(): boolean {
-  return false
-  // return !(USE_BEDROCK || USE_VERTEX)
+  return true
 }
 
 export function isLoggedInToAnthropic(): boolean {
-  return false
-  // const config = getGlobalConfig()
-  // return !!config.primaryApiKey
+  const config = getGlobalConfig()
+  return !!config.primaryApiKey
 }

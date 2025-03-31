@@ -241,6 +241,16 @@ export async function getCompletion(
   maxAttempts: number = 5
 ): Promise<OpenAI.ChatCompletion | AsyncIterable<OpenAI.ChatCompletionChunk>> {
   const config = getGlobalConfig()
+  // Get the provider from config
+  const provider = config.primaryProvider
+  
+  // Use either the provided model in options, or the configured model from config
+  if (!opts.model) {
+    opts.model = type === 'large' ? config.largeModelName : config.smallModelName
+    // Ensure we're logging what we're actually using
+    console.log(`Using model: ${opts.model} for ${type} model type with provider ${provider}`)
+  }
+  
   const failedKeys = getSessionState('failedApiKeys')[type]
   const availableKeys = getApiKeys(config, type)
   const allKeysFailed = failedKeys.length === availableKeys.length && availableKeys.length > 0
@@ -251,11 +261,15 @@ export async function getCompletion(
 
   const apiKey = getActiveApiKey(config, type)
   if (!apiKey || apiKey.trim() === '') {
+    console.log(`No API key available for ${config.primaryProvider} (${type} model), retrying...`)
     return getCompletion(type, opts, attempt + 1, maxAttempts)
   }
 
-  const apiKeyRequired = type === 'large' ? config.largeModelApiKeyRequired : config.smallModelApiKeyRequired
+  // Always treat API key as required for non-local providers
+  const apiKeyRequired = provider !== 'custom' && provider !== 'ollama'
   const baseURL = type === 'large' ? config.largeModelBaseURL : config.smallModelBaseURL
+  
+  console.log(`Using API endpoint: ${baseURL}/chat/completions for ${config.primaryProvider}`)
   const proxy = config.proxy ? new ProxyAgent(config.proxy) : undefined
 
   logEvent('get_completion', {

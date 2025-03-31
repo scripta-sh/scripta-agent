@@ -264,12 +264,7 @@ export function getGlobalConfig(): GlobalConfig {
 export function getAnthropicApiKey(): null | string {
   const config = getGlobalConfig()
   
-  // Check environment variables first
-  if (process.env.ANTHROPIC_API_KEY) {
-    return process.env.ANTHROPIC_API_KEY;
-  }
-  
-  // Fall back to API keys from config
+  // Only use API keys from config
   if (config.primaryProvider === 'anthropic' && config.primaryApiKey) {
     return config.primaryApiKey;
   }
@@ -636,8 +631,21 @@ export function listConfigForCLI(global: boolean): object {
   }
 }
 
-export function getOpenAIApiKey(): string | undefined {
-  return process.env.OPENAI_API_KEY
+export function getProviderApiKey(provider: ProviderType, type: 'small' | 'large' = 'large'): string | null {
+  const config = getGlobalConfig();
+  
+  // Check if provider matches the primary provider and has primaryApiKey
+  if (config.primaryProvider === provider && config.primaryApiKey) {
+    return config.primaryApiKey;
+  }
+  
+  // Get API keys for the specified model type
+  const keys = type === 'small' ? config.smallModelApiKeys : config.largeModelApiKeys;
+  if (keys && keys.length > 0) {
+    return keys[0];
+  }
+  
+  return null;
 }
 
 export function addApiKey(config: GlobalConfig, key: string, type: 'small' | 'large'): void {

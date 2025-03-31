@@ -37,7 +37,6 @@ import { cwd } from 'process'
 import { dateToFilename, logError, parseLogFilename } from '../utils/log'
 import { Onboarding } from '../components/Onboarding'
 import { Doctor } from '../screens/Doctor'
-import { ApproveApiKey } from '../components/ApproveApiKey'
 import { TrustDialog } from '../components/TrustDialog'
 import { checkHasTrustDialogAccepted } from '../utils/config'
 import { isDefaultSlowAndCapableModel } from '../utils/model'
@@ -81,6 +80,25 @@ import { showInvalidConfigDialog } from '../components/InvalidConfigDialog'
 import { ConfigParseError } from '../utils/errors'
 import { grantReadPermissionForOriginalDir } from '../utils/permissions/filesystem'
 import { MACRO } from '../constants/macros'
+import meow from 'meow'
+import * as readline from 'readline'
+import figures from 'figures'
+import { createHash } from 'crypto'
+import chalk from 'chalk'
+import { ExitError } from '../screens/REPL'
+import { setUpProjectConfigIfNeeded } from '../utils/project-onboarding'
+import { CommandType } from './commands'
+import type { Question } from '../components/Question'
+import {
+  grantReadPermissionForPath,
+} from '../utils/permissions'
+import { findMcprcServersThatNeedApproval } from '../utils/mcprc'
+import { McprcApprovalDialog } from '../screens/McprcApprovalDialog'
+import { version } from '../../package.json'
+import { ClaudeDesktopDialog } from '../screens/ClaudeDesktopDialog'
+import os from 'os'
+import { showError } from '../utils/error-handling'
+
 export function completeOnboarding(): void {
   const config = getGlobalConfig()
   saveGlobalConfig({
@@ -119,30 +137,6 @@ async function showSetupScreens(
       )
     })
   }
-
-  // // Check for custom API key (only allowed for ants)
-  // if (process.env.ANTHROPIC_API_KEY && process.env.USER_TYPE === 'ant') {
-  //   const customApiKeyTruncated = normalizeApiKeyForConfig(
-  //     process.env.ANTHROPIC_API_KEY!,
-  //   )
-  //   const keyStatus = getCustomApiKeyStatus(customApiKeyTruncated)
-  //   if (keyStatus === 'new') {
-  //     await new Promise<void>(resolve => {
-  //       render(
-  //         <ApproveApiKey
-  //           customApiKeyTruncated={customApiKeyTruncated}
-  //           onDone={async () => {
-  //             await clearTerminal()
-  //             resolve()
-  //           }}
-  //         />,
-  //         {
-  //           exitOnCtrlC: false,
-  //         },
-  //       )
-  //     })
-  //   }
-  // }
 
   // In non-interactive or dangerously-skip-permissions mode, skip the trust dialog
   if (!print && !dangerouslySkipPermissions) {

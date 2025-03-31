@@ -63,8 +63,22 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     printModelConfig()
     onDoneProp()
   }
-  // Initialize the exit hook but don't use it for Escape key
-  const exitState = useExitOnCtrlCD(() => process.exit(0))
+  
+  // Create a clean exit function that resets all state
+  const handleExit = () => {
+    // Reset all temporary state before exiting
+    setSelectedModel('')
+    setApiKey('')
+    setApiKeyEdited(false)
+    setSelectedProvider(config.primaryProvider || 'anthropic')
+    setModelLoadError(null)
+    
+    // Exit without saving changes
+    process.exit(0)
+  }
+  
+  // Initialize the exit hook with our clean exit function
+  const exitState = useExitOnCtrlCD(handleExit)
   
   // Screen navigation stack
   const [screenStack, setScreenStack] = useState<Array<'modelType' | 'provider' | 'apiKey' | 'model' | 'modelParams' | 'confirmation'>>(['modelType'])
@@ -83,7 +97,14 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       // Remove the current screen from the stack
       setScreenStack(prev => prev.slice(0, -1))
     } else {
-      // If we're at the first screen, call onDone to exit
+      // If we're at the first screen, reset all temporary state and exit
+      setSelectedModel('')
+      setApiKey('')
+      setApiKeyEdited(false)
+      setSelectedProvider(config.primaryProvider || 'anthropic')
+      setModelLoadError(null)
+      
+      // Call onDone to exit without saving changes
       onDone()
     }
   }
@@ -145,13 +166,19 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     }
   })
   
+  // useEffect for initializing API key from existing config
   useEffect(() => {
     if(!apiKeyEdited && selectedProvider) {
-      if(!apiKey && process.env[selectedProvider.toUpperCase() + '_API_KEY']) {
-        setApiKey(process.env[selectedProvider.toUpperCase() + '_API_KEY'] as string)
+      const config = getGlobalConfig();
+      // Only use existing API key if it belongs to the current provider
+      if (config.primaryProvider === selectedProvider && config.primaryApiKey) {
+        setApiKey(config.primaryApiKey);
+      } else {
+        // When switching to a different provider, start with empty API key
+        setApiKey('');
       }
     }
-  }, [selectedProvider, apiKey, apiKeyEdited])
+  }, [selectedProvider, apiKeyEdited])
 
   // Create a set of model names from our constants/models.ts for the current provider
   const ourModelNames = new Set(
@@ -219,19 +246,19 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     const providerType = provider as ProviderType
     setSelectedProvider(providerType)
     
+    // Reset the selected model when changing providers to avoid invalid model names
+    setSelectedModel('')
+    
+    // Reset API key and edited state when changing providers
+    setApiKey('')
+    setApiKeyEdited(false)
+    
     if (provider === 'custom') {
       // For custom provider, save and exit
       saveConfiguration(providerType, selectedModel || config.largeModelName || '')
       onDone()
-    } else if (provider === 'anthropic') {
-      // For Anthropic, fetch models directly
-      setApiKey(''); // Clear any previous API key
-      fetchModels()
-        .catch(error => {
-          setModelLoadError(`Error loading models: ${error.message}`)
-        })
     } else {
-      // For other providers, go to API key input
+      // Go to API key input for ALL providers (including Anthropic)
       navigateTo('apiKey')
     }
   }
@@ -275,7 +302,9 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
         max_tokens: model.max_output_tokens || model.max_tokens,
         supports_vision: model.supports_vision || false,
         supports_function_calling: model.supports_function_calling || false,
-        supports_reasoning_effort: model.supports_reasoning_effort || false
+        // Check for specific models that support reasoning effort
+        // Claude 3 models support this feature
+        supports_reasoning_effort: model.model.includes('claude-3')
       }));
       
       return anthropicModels;
@@ -290,10 +319,31 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     setModelLoadError(null)
     
     try {
+      // Skip API call if no API key provided (for all providers except 'custom' and 'ollama')
+      if (!apiKey && selectedProvider !== 'custom' && selectedProvider !== 'ollama') {
+        setModelLoadError('API key is required to fetch model list');
+        return [];
+      }
+      
+      let fetchedModels = [];
+      
       // Special handling for Anthropic models - use predefined models from constants
       if (selectedProvider === 'anthropic') {
         const anthropicModels = await fetchAnthropicModels()
         setAvailableModels(anthropicModels)
+        
+        // Set a default Anthropic model if available
+        if (anthropicModels.length > 0) {
+          // Prefer claude-3-haiku if available
+          const haikuModel = anthropicModels.find(model => model.model.includes('haiku'));
+          if (haikuModel) {
+            setSelectedModel(haikuModel.model);
+          } else {
+            // Otherwise use the first model
+            setSelectedModel(anthropicModels[0].model);
+          }
+        }
+        
         navigateTo('model')
         return anthropicModels
       }
@@ -302,18 +352,18 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       if (selectedProvider === 'gemini') {
         const geminiModels = await fetchGeminiModels()
         setAvailableModels(geminiModels)
+        
+        // Set a default Gemini model if available
+        if (geminiModels.length > 0) {
+          setSelectedModel(geminiModels[0].model);
+        }
+        
         navigateTo('model')
         return geminiModels
       }
       
       // For all other OpenAI-compatible providers, use the OpenAI client
       const baseURL = providers[selectedProvider]?.baseURL
-
-      // Skip API call if no API key provided (for some providers it's optional)
-      if (!apiKey && selectedProvider !== 'custom') {
-        setModelLoadError('API key is required to fetch model list');
-        return [];
-      }
 
       const openai = new OpenAI({
         apiKey: apiKey,
@@ -325,7 +375,7 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       const response = await openai.models.list()
       
       // Transform the response into our ModelInfo format
-      const fetchedModels = [] 
+      fetchedModels = [] 
       for (const model of response.data) {
         const modelInfo = models[selectedProvider as keyof typeof models]?.find(m => m.model === model.id)
         fetchedModels.push({
@@ -339,6 +389,41 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       }
       
       setAvailableModels(fetchedModels)
+      
+      // Set a default model if available
+      if (fetchedModels.length > 0) {
+        // For OpenAI, prefer gpt-3.5-turbo
+        if (selectedProvider === 'openai') {
+          const gptModel = fetchedModels.find(model => model.model.includes('gpt-3.5-turbo'));
+          if (gptModel) {
+            setSelectedModel(gptModel.model);
+          } else {
+            setSelectedModel(fetchedModels[0].model);
+          }
+        } 
+        // For Mistral, prefer mistral-medium
+        else if (selectedProvider === 'mistral') {
+          const mistralModel = fetchedModels.find(model => model.model.includes('mistral-medium'));
+          if (mistralModel) {
+            setSelectedModel(mistralModel.model);
+          } else {
+            setSelectedModel(fetchedModels[0].model);
+          }
+        }
+        // For DeepSeek, prefer deepseek-chat
+        else if (selectedProvider === 'deepseek') {
+          const deepseekModel = fetchedModels.find(model => model.model.includes('deepseek-chat'));
+          if (deepseekModel) {
+            setSelectedModel(deepseekModel.model);
+          } else {
+            setSelectedModel(fetchedModels[0].model);
+          }
+        }
+        // Default to first model for other providers
+        else {
+          setSelectedModel(fetchedModels[0].model);
+        }
+      }
       
       // Navigate to model selection screen if models were loaded successfully
       navigateTo('model')
@@ -400,26 +485,43 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
   function saveConfiguration(provider: ProviderType, model: string) {
     const baseURL = providers[provider]?.baseURL || ""
     
+    // Get default model for the provider if none is selected
+    let modelToUse = model;
+    if (!modelToUse || modelToUse === '') {
+      // Set appropriate default models based on provider
+      if (provider === 'anthropic') {
+        modelToUse = 'claude-3-haiku-20240307'
+      } else if (provider === 'openai') {
+        modelToUse = 'gpt-3.5-turbo'
+      } else if (provider === 'mistral') {
+        modelToUse = 'mistral-medium'
+      } else if (provider === 'deepseek') {
+        modelToUse = 'deepseek-chat'
+      } else {
+        // For other providers, use the existing model name or empty string
+        modelToUse = config.largeModelName || ''
+      }
+    }
+    
     // Create a new config object based on the existing one
     const newConfig = { ...config }
     
-    // Update the primary provider regardless of which model we're changing
+    // Always update the primary provider and set primaryApiKey
     newConfig.primaryProvider = provider
+    if (apiKey) {
+      newConfig.primaryApiKey = apiKey
+    }
     
-    // Set API key requirement - Anthropic models need API key but it can come from environment
+    // Set API key requirement - only for providers that need API keys
     const apiKeyRequired = provider !== 'custom' && provider !== 'ollama';
-    
-    // Get appropriate environment variable name for this provider
-    const envApiKeyName = `${provider.toUpperCase()}_API_KEY`;
-    const hasEnvApiKey = process.env[envApiKeyName] ? true : false;
     
     // Update the appropriate model based on the selection
     if (modelTypeToChange === 'both' || modelTypeToChange === 'large') {
-      newConfig.largeModelName = model
+      newConfig.largeModelName = modelToUse
       newConfig.largeModelBaseURL = baseURL
       
-      // Only set API key in config if provided and not already in environment
-      if (apiKey && (!hasEnvApiKey || provider === 'anthropic')) {
+      // Always set API key in config if provided
+      if (apiKey) {
         newConfig.largeModelApiKeys = [apiKey]
       }
       
@@ -434,15 +536,15 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       }
       
       // Set API key requirement based on provider
-      newConfig.largeModelApiKeyRequired = apiKeyRequired && !hasEnvApiKey
+      newConfig.largeModelApiKeyRequired = apiKeyRequired
     }
     
     if (modelTypeToChange === 'both' || modelTypeToChange === 'small') {
-      newConfig.smallModelName = model
+      newConfig.smallModelName = modelToUse
       newConfig.smallModelBaseURL = baseURL
       
-      // Only set API key in config if provided and not already in environment
-      if (apiKey && (!hasEnvApiKey || provider === 'anthropic')) {
+      // Always set API key in config if provided
+      if (apiKey) {
         newConfig.smallModelApiKeys = [apiKey]
       }
       
@@ -457,7 +559,7 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       }
       
       // Set API key requirement based on provider
-      newConfig.smallModelApiKeyRequired = apiKeyRequired && !hasEnvApiKey
+      newConfig.smallModelApiKeyRequired = apiKeyRequired
     }
     
     // Save the updated configuration
@@ -555,7 +657,15 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
       if (activeFieldIndex === formFields.length - 1) {
         // If on the Continue button, submit the form
         handleModelParamsSubmit()
-      } 
+      } else {
+        // If on any other field, move to the next field
+        // This is important for select fields that don't auto-advance when Enter is pressed
+        const currentField = formFields[activeFieldIndex];
+        if (currentField.component === 'select') {
+          // For select fields, just advance to the next field
+          setActiveFieldIndex((current) => (current + 1) % formFields.length);
+        }
+      }
       return
     }
   });

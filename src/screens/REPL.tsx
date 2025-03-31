@@ -560,8 +560,7 @@ export function REPL({
                                                 {
                                                     type: 'tool_result',
                                                     tool_use_id: coreEvent.toolUseId,
-                                                    content: resultContent,
-                                                    name: coreEvent.toolName // Important: include the tool name
+                                                    content: resultContent
                                                 }
                                             ]
                                         },
@@ -615,8 +614,6 @@ export function REPL({
                                 type: 'tool_result',
                                 tool_use_id: coreEvent.toolUseId,
                                 content: finalContent,
-                                // Include original data object for LLM if available
-                                data: toolResultObject || undefined,
                                 is_error: false
                              };
 
@@ -673,8 +670,7 @@ export function REPL({
                     is_error: toolResult?.is_error,
                     contentSize: typeof toolResult?.content === 'string' ? 
                         `${Math.min(toolResult.content.length, 50)} chars` + 
-                        (toolResult.content.length > 50 ? '...' : '') : 'object',
-                    hasData: toolResult?.data ? 'yes' : 'no'
+                        (toolResult.content.length > 50 ? '...' : '') : 'object'
                  });
                  return toolResult; // Send the actual result (or error) back
 

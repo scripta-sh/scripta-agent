@@ -356,25 +356,8 @@ export function Config({ onClose }: Props): React.ReactNode {
       // Log any changes that were made
       // TODO: Make these proper messages
       const changes: string[] = []
-      // Check for API key changes
-      const initialUsingCustomKey = Boolean(
-        process.env.ANTHROPIC_API_KEY &&
-          initialConfig.current.customApiKeyResponses?.approved?.includes(
-            normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY),
-          ),
-      )
-      const currentUsingCustomKey = Boolean(
-        process.env.ANTHROPIC_API_KEY &&
-          globalConfig.customApiKeyResponses?.approved?.includes(
-            normalizeApiKeyForConfig(process.env.ANTHROPIC_API_KEY),
-          ),
-      )
-      if (initialUsingCustomKey !== currentUsingCustomKey) {
-        changes.push(
-          `  ⎿  ${currentUsingCustomKey ? 'Enabled' : 'Disabled'} custom API key`,
-        )
-      }
-
+      // Check for API key changes - no longer using environment variables
+      
       if (globalConfig.verbose !== initialConfig.current.verbose) {
         changes.push(`  ⎿  Set verbose to ${chalk.bold(globalConfig.verbose)}`)
       }

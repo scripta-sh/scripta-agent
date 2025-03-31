@@ -773,11 +773,37 @@ export function normalizeMessagesForAPI(
   messages: Message[],
 ): (UserMessage | AssistantMessage)[] {
   const result: (UserMessage | AssistantMessage)[] = []
+  
+  // First pass: collect all tool use IDs from assistant messages
+  const toolUseIds = new Set<string>();
+  messages.forEach(message => {
+    if (message.type === 'assistant' && Array.isArray(message.message.content)) {
+      message.message.content.forEach(block => {
+        if (block.type === 'tool_use' && block.id) {
+          toolUseIds.add(block.id);
+        }
+      });
+    }
+  });
+  
+  // Second pass: process messages, skipping orphaned tool results
   messages
     .filter(_ => _.type !== 'progress')
     .forEach(message => {
       switch (message.type) {
         case 'user': {
+          // Skip orphaned tool results (those without a corresponding tool use request)
+          if (
+            Array.isArray(message.message.content) &&
+            message.message.content[0]?.type === 'tool_result'
+          ) {
+            const toolUseId = message.message.content[0].tool_use_id;
+            // Skip this message if it's a tool result without a corresponding tool use
+            if (!toolUseIds.has(toolUseId)) {
+              return;
+            }
+          }
+
           // If the current message is not a tool result, add it to the result
           if (
             !Array.isArray(message.message.content) ||
