@@ -6,7 +6,7 @@ import {
 } from '../../utils/messages.js'
 import { getCwd } from '../../utils/state'
 import { PRODUCT_NAME, PROJECT_FILE, PRODUCT_COMMAND } from './product'
-import { BashTool } from '../../tools/BashTool/BashTool'
+import { BashTool } from '../tools/shell'
 import { getSlowAndCapableModel } from '../../utils/model'
 import { MACRO } from './macros'
 export function getCLISyspromptPrefix(): string {

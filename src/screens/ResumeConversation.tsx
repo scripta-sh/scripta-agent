@@ -5,7 +5,7 @@ import { deserializeMessages } from '../utils/conversationRecovery'
 import { LogSelector } from '../components/LogSelector'
 import type { LogOption } from '../types/logs'
 import { logError, getNextAvailableLogForkNumber } from '../utils/log'
-import type { Tool } from '../Tool'
+import type { Tool } from '../core/tools/types'
 import { Command } from '../commands'
 import { isDefaultSlowAndCapableModel } from '../utils/model'
 

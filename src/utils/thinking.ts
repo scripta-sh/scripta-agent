@@ -2,7 +2,7 @@ import { last } from 'lodash-es'
 import type { Message } from '../query'
 import { logEvent } from '../services/statsig'
 import { getLastAssistantMessageId } from './messages'
-import { ThinkTool } from '../tools/ThinkTool/ThinkTool'
+import { ThinkTool } from '../core/tools'
 import { USE_BEDROCK, USE_VERTEX } from './model'
 import { getGlobalConfig } from './config'
 

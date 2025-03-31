@@ -20,7 +20,7 @@ import {
 } from '../../types/notebook'
 
 // Utility imports - will be updated later
-import { formatOutput } from '../../../../tools/BashTool/utils'
+import { formatOutput } from '../../shell/BashTool/utils'
 import { getCwd } from '../../../../utils/state'
 import { findSimilarFile } from '../../../../utils/file'
 import { hasReadPermission } from '../../../../utils/permissions/filesystem'

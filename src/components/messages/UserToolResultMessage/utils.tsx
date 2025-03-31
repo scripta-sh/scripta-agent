@@ -1,9 +1,8 @@
 import { ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { Message } from '../../../query'
 import { useMemo } from 'react'
-import { Tool } from '../../../Tool'
-import { GlobTool } from '../../../tools/GlobTool/GlobTool'
-import { GrepTool } from '../../../tools/GrepTool/GrepTool'
+import { Tool } from '../../../core/tools/types'
+import { GlobTool, GrepTool } from '../../../core/tools/filesystem'
 import { logEvent } from '../../../services/statsig'
 
 function getToolUseFromMessages(

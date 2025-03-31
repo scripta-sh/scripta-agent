@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Tool } from '../../Tool';
+import { Tool } from '../../core/tools/interfaces/Tool';
 import { IPermissionHandler, PermissionRequest, PermissionHandlerContext } from '../../core/permissions/IPermissionHandler';
 import {
   hasPermissionsToUseTool,
@@ -10,13 +10,13 @@ import { ToolUseConfirm } from '../../components/permissions/PermissionRequest';
 import { AssistantMessage } from '../../query'; // Needed for ToolUseConfirm type
 import { logEvent } from '../../services/statsig';
 import { REJECT_MESSAGE } from '../../utils/messages';
-import { BashTool, inputSchema as bashInputSchema } from '../../tools/BashTool/BashTool';
 import { getCommandSubcommandPrefix } from '../../utils/commands';
 import { AbortError } from '../../utils/errors';
-import { getGlobalConfig } from '../../utils/config'; // Fixed from @/ to relative path
-import { FileEditTool } from '../../tools/FileEditTool/FileEditTool'; // Fixed from @/ to relative path
-import { FileWriteTool } from '../../tools/FileWriteTool/FileWriteTool'; // Fixed from @/ to relative path
-import { NotebookEditTool } from '../../tools/NotebookEditTool/NotebookEditTool'; // Fixed from @/ to relative path
+import { getGlobalConfig } from '../../utils/config';
+// Import tools from core
+import { FileEditTool } from '../../core/tools/filesystem';
+import { FileWriteTool } from '../../core/tools/filesystem';
+import { NotebookEditTool } from '../../core/tools/notebook';
 import { randomUUID } from 'crypto';
 import { createComponentLogger } from '../../utils/log';
 

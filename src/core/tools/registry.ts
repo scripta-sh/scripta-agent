@@ -42,6 +42,20 @@ export function getTool(name: string): Tool | undefined {
 }
 
 /**
+ * Get a tool by name or throw if not found
+ * @param name The name of the tool
+ * @returns The tool
+ * @throws Error if the tool is not found
+ */
+export function getToolOrThrow(name: string): Tool {
+  const tool = getTool(name);
+  if (!tool) {
+    throw new Error(`Tool not found: ${name}`);
+  }
+  return tool;
+}
+
+/**
  * Get all registered tools
  * @returns Array of all registered tools
  */

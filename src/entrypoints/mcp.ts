@@ -9,19 +9,24 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { zodToJsonSchema } from 'zod-to-json-schema'
-import { AgentTool } from '../tools/AgentTool/AgentTool'
 import { hasPermissionsToUseTool } from '../permissions'
 import { setCwd } from '../utils/state'
 import { getSlowAndCapableModel } from '../utils/model'
 import { logError } from '../utils/log'
-import { LSTool } from '../tools/lsTool/lsTool'
-import { BashTool } from '../tools/BashTool/BashTool'
-import { FileEditTool } from '../tools/FileEditTool/FileEditTool'
-import { FileReadTool } from '../tools/FileReadTool/FileReadTool'
-import { GlobTool } from '../tools/GlobTool/GlobTool'
-import { GrepTool } from '../tools/GrepTool/GrepTool'
-import { FileWriteTool } from '../tools/FileWriteTool/FileWriteTool'
-import { Tool } from '../Tool'
+import { initializeCore } from '../core/initialization'
+import { 
+  AgentTool, 
+  LSTool, 
+  BashTool, 
+  FileEditTool, 
+  FileReadTool 
+} from '../core/tools'
+import { 
+  GlobTool,
+  GrepTool,
+  FileWriteTool,
+  Tool
+} from '../core/tools'
 import { Command } from '../commands'
 import review from '../commands/review'
 import { lastX } from '../utils/generators'

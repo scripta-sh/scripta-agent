@@ -6,7 +6,7 @@ import {
 import { logError } from './utils/log'
 import { getCwd } from './utils/state'
 import { memoize, omit } from 'lodash-es'
-import { LSTool } from './tools/lsTool/lsTool'
+import { LSTool } from './core/tools/filesystem'
 import { getIsGit } from './utils/git'
 import { ripGrep } from './utils/ripgrep'
 import * as path from 'path'

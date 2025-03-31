@@ -53,6 +53,7 @@ export class CoreArchitectTool extends BaseTool {
   }
 
   async isEnabled() {
+    // Disable Architect tool by default
     return false;
   }
 

@@ -19,8 +19,10 @@ import { getContext, setContext, removeContext } from '../context'
 import { Command } from '@commander-js/extra-typings'
 import { ask } from '../utils/ask'
 import { hasPermissionsToUseTool } from '../permissions'
-import { getTools } from '../tools'
+// Legacy tool import removed
+import { getEnabledTools } from '../core/tools/registry'
 import { initializeCore } from '../core/initialization'
+import { initializeToolRenderers } from '../components/tools/initRenderers'
 import {
   getGlobalConfig,
   getCurrentProjectConfig,
@@ -179,9 +181,9 @@ async function setup(
   // Always grant read permissions for original working dir
   grantReadPermissionForOriginalDir()
   
-  // Initialize the core components and tools
-  await initializeCore()
-
+  // Note: We initialize the core components and tools later, right before getting tools
+  // This avoids timing issues with other setup steps
+  
   // If --dangerously-skip-permissions is set, verify we're in a safe environment
   if (dangerouslySkipPermissions) {
     // Check if running as root/sudo on Unix-like systems
@@ -392,10 +394,13 @@ ${commandList}`,
 
         assertMinVersion()
 
+        // Initialize the core and tool renderers before getting tools
+        await initializeCore();
+        initializeToolRenderers();
+        
+        // Get tools from core registry instead of legacy system
         const [tools, mcpClients] = await Promise.all([
-          getTools(
-            enableArchitect ?? getCurrentProjectConfig().enableArchitectTool,
-          ),
+          getEnabledTools(),
           getClients(),
         ])
         // logStartup()

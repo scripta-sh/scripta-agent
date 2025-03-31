@@ -1,5 +1,5 @@
 import type { Command } from '../commands'
-import type { Tool } from '../Tool'
+import type { Tool } from '../core/tools/types'
 import Table from 'cli-table3'
 import { getSystemPrompt } from '../core/constants/prompts'
 import { getContext } from '../context'

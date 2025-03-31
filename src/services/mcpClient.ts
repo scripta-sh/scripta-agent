@@ -32,8 +32,8 @@ import {
   ResultSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { memoize, pickBy } from 'lodash-es'
-import type { Tool } from '../Tool'
-import { MCPTool } from '../tools/MCPTool/MCPTool'
+import type { Tool } from '../core/tools/types'
+import { MCPTool } from '../core/tools'
 import { logMCPError } from '../utils/log'
 import { Command } from '../commands'
 import { logEvent } from '../services/statsig'

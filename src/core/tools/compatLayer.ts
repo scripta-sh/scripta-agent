@@ -5,7 +5,7 @@
 
 import { Tool as CoreTool } from './interfaces/Tool';
 import { getAllTools, getEnabledTools } from './registry';
-import { Tool as LegacyTool } from '../../Tool';
+import { Tool as LegacyTool } from './types';
 
 /**
  * Create a legacy wrapper for a core tool

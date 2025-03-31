@@ -1,8 +1,10 @@
 import { Box, Text } from 'ink'
 import * as React from 'react'
-import { getTheme } from '../../utils/theme'
-import { MAX_RENDERED_LINES } from './prompt'
+import { getTheme } from '../../../utils/theme'
 import chalk from 'chalk'
+
+// Define constant here rather than importing from BashTool
+const MAX_RENDERED_LINES = 20;
 
 function renderTruncatedContent(content: string, totalLines: number): string {
   const allLines = content.split('\n')
@@ -18,17 +20,19 @@ function renderTruncatedContent(content: string, totalLines: number): string {
   ].join('\n')
 }
 
+export interface OutputLineProps {
+  content: string;
+  lines: number;
+  verbose: boolean;
+  isError?: boolean;
+}
+
 export function OutputLine({
   content,
   lines,
   verbose,
   isError,
-}: {
-  content: string
-  lines: number
-  verbose: boolean
-  isError?: boolean
-}) {
+}: OutputLineProps) {
   return (
     <Box justifyContent="space-between" width="100%">
       <Box flexDirection="row">

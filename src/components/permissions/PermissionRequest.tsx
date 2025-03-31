@@ -1,10 +1,7 @@
 import { useInput } from 'ink'
 import * as React from 'react'
-import { Tool } from '../../Tool'
 import { AssistantMessage } from '../../query'
-import { FileEditTool } from '../../tools/FileEditTool/FileEditTool'
-import { FileWriteTool } from '../../tools/FileWriteTool/FileWriteTool'
-import { BashTool } from '../../tools/BashTool/BashTool'
+import { Tool, FileEditTool, FileWriteTool, BashTool } from '../../core/tools'
 import { FileEditPermissionRequest } from './FileEditPermissionRequest/FileEditPermissionRequest'
 import { BashPermissionRequest } from './BashPermissionRequest/BashPermissionRequest'
 import { FallbackPermissionRequest } from './FallbackPermissionRequest'
@@ -12,12 +9,14 @@ import { useNotifyAfterTimeout } from '../../hooks/useNotifyAfterTimeout'
 import { FileWritePermissionRequest } from './FileWritePermissionRequest/FileWritePermissionRequest'
 import { type CommandSubcommandPrefixResult } from '../../utils/commands'
 import { FilesystemPermissionRequest } from './FilesystemPermissionRequest/FilesystemPermissionRequest'
-import { NotebookEditTool } from '../../tools/NotebookEditTool/NotebookEditTool'
-import { GlobTool } from '../../tools/GlobTool/GlobTool'
-import { GrepTool } from '../../tools/GrepTool/GrepTool'
-import { LSTool } from '../../tools/lsTool/lsTool'
-import { FileReadTool } from '../../tools/FileReadTool/FileReadTool'
-import { NotebookReadTool } from '../../tools/NotebookReadTool/NotebookReadTool'
+import { 
+  NotebookEditTool,
+  GlobTool,
+  GrepTool,
+  LSTool,
+  FileReadTool,
+  NotebookReadTool
+} from '../../core/tools'
 import { PRODUCT_NAME } from '../../core/constants/product'
 
 function permissionComponentForTool(tool: Tool) {

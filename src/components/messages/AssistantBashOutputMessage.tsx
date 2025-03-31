@@ -1,5 +1,8 @@
 import * as React from 'react'
-import BashToolResultMessage from '../../tools/BashTool/BashToolResultMessage'
+// Replace with core BashTool
+import { Box, Text } from 'ink'
+import { OutputLine } from '../tools/common/OutputLine'
+import { getTheme } from '../../utils/theme'
 import { extractTag } from '../../utils/messages'
 
 export function AssistantBashOutputMessage({
@@ -13,10 +16,23 @@ export function AssistantBashOutputMessage({
   const stderr = extractTag(content, 'bash-stderr') ?? ''
   const stdoutLines = stdout.split('\n').length
   const stderrLines = stderr.split('\n').length
+  const theme = getTheme();
+  const hasError = stderr && stderr.trim() !== '';
+    
   return (
-    <BashToolResultMessage
-      content={{ stdout, stdoutLines, stderr, stderrLines }}
-      verbose={!!verbose}
-    />
+    <Box flexDirection="column">
+      {stdout && (
+        <Box flexDirection="column">
+          <OutputLine content={stdout} lines={stdoutLines} verbose={!!verbose} />
+        </Box>
+      )}
+      
+      {hasError && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={theme.error}>stderr:</Text>
+          <OutputLine content={stderr} lines={stderrLines} verbose={!!verbose} isError={true} />
+        </Box>
+      )}
+    </Box>
   )
 }

@@ -3,8 +3,8 @@
  * Migrated from src/query.ts
  */
 
-import { BashTool } from '../../tools/BashTool/BashTool';
-import { Tool } from '../../Tool';
+import { BashTool } from '../tools/shell';
+import type { Tool } from '../tools/types';
 import { getCwd } from '../../utils/state';
 import { UserMessage, AssistantMessage, BinaryFeedbackResult, ToolUseContext } from './types';
 import { shouldUseBinaryFeedback, messagePairValidForBinaryFeedback } from '../../components/binary-feedback/utils';

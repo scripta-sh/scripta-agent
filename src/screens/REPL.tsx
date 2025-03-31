@@ -42,7 +42,8 @@ import {
   // Removed "query" import - we're using ScriptaCore's processInput instead
 } from '../query'
 import type { WrappedClient } from '../services/mcpClient'
-import type { Tool } from '../Tool'
+import type { Tool } from '../core/tools/types'
+import { getTool, getToolOrThrow } from '../core/tools'
 import { AutoUpdaterResult } from '../utils/autoUpdater'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config'
 import { logEvent } from '../services/statsig'
@@ -412,10 +413,8 @@ export function REPL({
   const [isLoading, setIsLoading] = useState(false)
   const [autoUpdaterResult, setAutoUpdaterResult] =
     useState<AutoUpdaterResult | null>(null)
-  const [toolJSX, setToolJSX] = useState<{
-    jsx: React.ReactNode | null
-    shouldHidePromptInput: boolean
-  } | null>(null)
+  // Use the new type definition
+  const [toolJSX, setToolJSX] = useState<import('../types/tool-ui').ToolJSX | null>(null)
   const [toolUseConfirm, setToolUseConfirm] = useState<ToolUseConfirm | null>(
     null,
   )
@@ -690,7 +689,13 @@ export function REPL({
 
         // --- Actual Tool Execution Logic ---
         let toolResult: ToolResultBlockParam | undefined = undefined;
-        const toolToUse = tools.find(t => t.name === coreEvent.toolName);
+        // Try to get the tool from the registry first, then fall back to props
+        let toolToUse = getTool(coreEvent.toolName);
+        
+        // If not found in registry, try to find in the tools passed as props
+        if (!toolToUse) {
+          toolToUse = tools.find(t => t.name === coreEvent.toolName);
+        }
 
         if (!toolToUse) {
           // Construct result object directly
