@@ -1,7 +1,9 @@
 import { Command } from '../commands'
 import { getContext } from '../context'
 import { getMessagesGetter, getMessagesSetter } from '../messages'
-import { API_ERROR_MESSAGE_PREFIX, queryAnthropicModel } from '../services/claude'
+import { llmService } from '../core/providers'
+import { API_ERROR_MESSAGE_PREFIX } from '../core/constants/providerErrors'
+import { UserMessage } from '../query'
 import {
   createUserMessage,
   normalizeMessagesForAPI,
@@ -31,10 +33,11 @@ const compact = {
       "Provide a detailed but concise summary of our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next.",
     )
 
-    const summaryResponse = await queryAnthropicModel(
-      normalizeMessagesForAPI([...messages, summaryRequest]),
+    const normalizedMessages = normalizeMessagesForAPI([...messages, summaryRequest])
+    const summaryResponse = await llmService.query(
+      normalizedMessages,
       ['You are a helpful AI assistant tasked with summarizing conversations.'],
-      0,
+      4000, // Use a reasonable token limit for summarization
       tools,
       abortController.signal,
       {

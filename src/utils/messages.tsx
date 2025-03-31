@@ -14,7 +14,7 @@ import { last, memoize } from 'lodash-es'
 import { logEvent } from '../services/statsig'
 import type { SetToolJSXFn, Tool, ToolUseContext } from '../Tool'
 import { lastX } from '../utils/generators'
-import { NO_CONTENT_MESSAGE } from '../services/claude'
+import { NO_CONTENT_MESSAGE } from '../core/constants/providerErrors.js'
 import {
   ImageBlockParam,
   TextBlockParam,

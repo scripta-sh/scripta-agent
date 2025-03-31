@@ -12,11 +12,11 @@ import { join } from 'path'
 import { homedir } from 'os'
 import terminalSetup from './commands/terminalSetup'
 import { getTheme } from './utils/theme'
-import { RELEASE_NOTES } from './constants/releaseNotes'
+import { RELEASE_NOTES } from './core/constants/releaseNotes.js'
 import { gt } from 'semver'
 import { isDirEmpty } from './utils/file'
-import { MACRO } from './constants/macros'
-import { PROJECT_FILE, PRODUCT_NAME } from './constants/product'
+import { MACRO } from './core/constants/macros.js'
+import { PROJECT_FILE, PRODUCT_NAME } from './core/constants/product.js'
 
 // Function to mark onboarding as complete
 export function markProjectOnboardingComplete(): void {

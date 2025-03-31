@@ -3,15 +3,18 @@ import { EOL } from 'os'
 import { isAbsolute, relative, resolve } from 'path'
 import * as React from 'react'
 import { z } from 'zod'
+import { randomUUID } from 'crypto'
 import { FallbackToolUseRejectedMessage } from '../../components/FallbackToolUseRejectedMessage'
-import { PRODUCT_NAME } from '../../constants/product'
-import { queryHaiku } from '../../services/claude'
+import { PRODUCT_NAME } from '../../core/constants/product'
+import { llmService } from '../../core/providers'
+import { UserMessage } from '../../query'
 import { Tool, ValidationResult } from '../../Tool'
 import { splitCommand } from '../../utils/commands'
 import { isInDirectory } from '../../utils/file'
 import { logError } from '../../utils/log'
 import { PersistentShell } from '../../utils/PersistentShell'
 import { getCwd, getOriginalCwd } from '../../utils/state'
+import { getGlobalConfig } from '../../utils/config'
 import BashToolResultMessage from './BashToolResultMessage'
 import { BANNED_COMMANDS, PROMPT } from './prompt'
 import { formatOutput, getCommandFilePaths } from './utils'
@@ -38,24 +41,46 @@ export const BashTool = {
   name: 'Bash',
   async description({ command }) {
     try {
-      const result = await queryHaiku({
-        systemPrompt: [
-          `You are a command description generator. Write a clear, concise description of what this command does in 5-10 words. Examples:
+      const config = getGlobalConfig();
+      const userMessage: UserMessage = {
+        type: 'user',
+        message: {
+          content: `Describe this command: ${command}`,
+          role: 'user',
+          id: randomUUID(),
+          type: 'message',
+        },
+        uuid: randomUUID(),
+      };
+      
+      const systemPrompt = [
+        `You are a command description generator. Write a clear, concise description of what this command does in 5-10 words. Examples:
 
-          Input: ls
-          Output: Lists files in current directory
+        Input: ls
+        Output: Lists files in current directory
 
-          Input: git status
-          Output: Shows working tree status
+        Input: git status
+        Output: Shows working tree status
 
-          Input: npm install
-          Output: Installs package dependencies
+        Input: npm install
+        Output: Installs package dependencies
 
-          Input: mkdir foo
-          Output: Creates directory 'foo'`,
-        ],
-        userPrompt: `Describe this command: ${command}`,
-      })
+        Input: mkdir foo
+        Output: Creates directory 'foo'`,
+      ];
+
+      const result = await llmService.query(
+        [userMessage],
+        systemPrompt,
+        1000, // Small token limit is efficient for this task
+        [],
+        new AbortController().signal,
+        {
+          model: config.smallModelName, // Use configured small model
+          prependCLISysprompt: true,
+        }
+      );
+      
       const description =
         result.message.content[0]?.type === 'text'
           ? result.message.content[0].text

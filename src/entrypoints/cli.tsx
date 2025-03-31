@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --no-warnings=ExperimentalWarning --enable-source-maps
 // import { initSentry } from '../services/sentry'
-import { PRODUCT_COMMAND, PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_COMMAND, PRODUCT_NAME } from '../core/constants/product'
 // initSentry() // Initialize Sentry as early as possible
 
 // XXX: Without this line (and the Object.keys, even though it seems like it does nothing!),
@@ -74,12 +74,12 @@ import {
 } from '../utils/autoUpdater.js'
 import { CACHE_PATHS } from '../utils/log'
 import { PersistentShell } from '../utils/PersistentShell'
-import { GATE_USE_EXTERNAL_UPDATER } from '../constants/betas'
+import { GATE_USE_EXTERNAL_UPDATER } from '../core/constants/betas'
 import { clearTerminal } from '../utils/terminal'
 import { showInvalidConfigDialog } from '../components/InvalidConfigDialog'
 import { ConfigParseError } from '../utils/errors'
 import { grantReadPermissionForOriginalDir } from '../utils/permissions/filesystem'
-import { MACRO } from '../constants/macros'
+import { MACRO } from '../core/constants/macros'
 // import meow from 'meow'
 // import * as readline from 'readline'
 // import figures from 'figures'
@@ -172,10 +172,7 @@ async function setup(
   cwd: string,
   dangerouslySkipPermissions?: boolean,
 ): Promise<void> {
-  // Set both current and original working directory if --cwd was provided
-  if (cwd !== process.cwd()) {
-    setOriginalCwd(cwd)
-  }
+  // Set the CWD right away
   await setCwd(cwd)
 
   // Always grant read permissions for original working dir
@@ -215,11 +212,16 @@ async function setup(
 
   cleanupOldMessageFilesInBackground()
   // getExampleCommands() // Pre-fetch example commands
-  getContext() // Pre-fetch all context data at once
+
+  // Fetch config and cwd needed for getContext
+  const currentConfig = getGlobalConfig() // Fetch the config
+  const currentCwd = getCwd() // Get the current CWD (already set above)
+  await getContext(currentCwd, currentConfig) // Pre-fetch context with args
+
   // initializeStatsig() // Kick off statsig initialization
 
   // Migrate old iterm2KeyBindingInstalled config to new shiftEnterKeyBindingInstalled
-  const globalConfig = getGlobalConfig()
+  const globalConfig = getGlobalConfig() // Reuse fetched config if possible
   if (
     globalConfig.iterm2KeyBindingInstalled === true &&
     globalConfig.shiftEnterKeyBindingInstalled !== true
@@ -269,6 +271,15 @@ async function main() {
   // Validate configs are valid and enable configuration system
   try {
     enableConfigs()
+    
+    // Initialize providers after configs are enabled
+    try {
+      const { initializeProviders } = await import('../core/providers');
+      await initializeProviders();
+    } catch (error) {
+      logError('Failed to initialize providers:', error);
+      // Continue execution even if provider initialization fails
+    }
   } catch (error: unknown) {
     if (error instanceof ConfigParseError) {
       // Show the invalid config dialog with the error object

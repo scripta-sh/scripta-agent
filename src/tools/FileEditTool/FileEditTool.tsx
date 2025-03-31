@@ -23,7 +23,7 @@ import { NotebookEditTool } from '../NotebookEditTool/NotebookEditTool'
 import { DESCRIPTION } from './prompt'
 import { applyEdit } from './utils'
 import { hasWritePermission } from '../../utils/permissions/filesystem'
-import { PROJECT_FILE } from '../../constants/product'
+import { PROJECT_FILE } from '../../core/constants/product'
 
 const inputSchema = z.strictObject({
   file_path: z.string().describe('The absolute path to the file to modify'),

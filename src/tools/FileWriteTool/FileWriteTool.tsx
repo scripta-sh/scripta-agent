@@ -24,7 +24,7 @@ import { getTheme } from '../../utils/theme'
 import { PROMPT } from './prompt'
 import { hasWritePermission } from '../../utils/permissions/filesystem'
 import { getPatch } from '../../utils/diff'
-import { PROJECT_FILE } from '../../constants/product'
+import { PROJECT_FILE } from '../../core/constants/product'
 
 const MAX_LINES_TO_RENDER = 10
 const MAX_LINES_TO_RENDER_FOR_ASSISTANT = 16000

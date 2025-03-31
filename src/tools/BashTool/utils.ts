@@ -1,4 +1,7 @@
-import { queryHaiku } from '../../services/claude'
+import { llmService } from '../../core/providers'
+import { randomUUID } from 'crypto'
+import { UserMessage } from '../../query'
+import { getGlobalConfig } from '../../utils/config'
 import { extractTag } from '../../utils/messages'
 import { MAX_OUTPUT_LENGTH } from './prompt'
 
@@ -27,9 +30,20 @@ export async function getCommandFilePaths(
   command: string,
   output: string,
 ): Promise<string[]> {
-  const response = await queryHaiku({
-    systemPrompt: [
-      `Extract any file paths that this command reads or modifies. For commands like "git diff" and "cat", include the paths of files being shown. Use paths verbatim -- don't add any slashes or try to resolve them. Do not try to infer paths that were not explicitly listed in the command output.
+  const config = getGlobalConfig();
+  const userMessage: UserMessage = {
+    type: 'user',
+    message: {
+      content: `Command: ${command}\nOutput: ${output}`,
+      role: 'user',
+      id: randomUUID(),
+      type: 'message',
+    },
+    uuid: randomUUID(),
+  };
+  
+  const systemPrompt = [
+    `Extract any file paths that this command reads or modifies. For commands like "git diff" and "cat", include the paths of files being shown. Use paths verbatim -- don't add any slashes or try to resolve them. Do not try to infer paths that were not explicitly listed in the command output.
 Format your response as:
 <filepaths>
 path/to/file1
@@ -41,16 +55,27 @@ If no files are read or modified, return empty filepaths tags:
 </filepaths>
 
 Do not include any other text in your response.`,
-    ],
-    userPrompt: `Command: ${command}\nOutput: ${output}`,
-    enablePromptCaching: true,
-  })
+  ];
+
+  const response = await llmService.query(
+    [userMessage],
+    systemPrompt,
+    1000, // Small token limit is efficient for this task
+    [],
+    new AbortController().signal,
+    {
+      model: config.smallModelName, // Use configured small model
+      prependCLISysprompt: true,
+      enablePromptCaching: true,
+    }
+  );
+  
   const content = response.message.content
     .filter(_ => _.type === 'text')
     .map(_ => _.text)
-    .join('')
+    .join('');
 
   return (
     extractTag(content, 'filepaths')?.trim().split('\n').filter(Boolean) || []
-  )
+  );
 }

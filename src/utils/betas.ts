@@ -4,7 +4,7 @@ import {
   GATE_TOKEN_EFFICIENT_TOOLS,
   BETA_HEADER_TOKEN_EFFICIENT_TOOLS,
   CLAUDE_CODE_20250219_BETA_HEADER,
-} from '../constants/betas.js'
+} from '../core/constants/betas.js'
 
 export const getBetas = memoize(async (): Promise<string[]> => {
   const betaHeaders = [CLAUDE_CODE_20250219_BETA_HEADER]

@@ -1,6 +1,6 @@
 import type { Command } from '../commands'
 import { markProjectOnboardingComplete } from '../ProjectOnboarding'
-import { PROJECT_FILE } from '../constants/product'
+import { PROJECT_FILE } from '../core/constants/product'
 const command = {
   type: 'prompt',
   name: 'init',

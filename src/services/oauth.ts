@@ -3,11 +3,10 @@ import * as http from 'http'
 import { IncomingMessage, ServerResponse } from 'http'
 import * as url from 'url'
 
-import { OAUTH_CONFIG } from '../constants/oauth'
+import { OAUTH_CONFIG } from '../core/constants/oauth'
 import { openBrowser } from '../utils/browser'
 import { logEvent } from '../services/statsig'
 import { logError } from '../utils/log'
-import { resetAnthropicClient } from './claude'
 import {
   AccountInfo,
   getGlobalConfig,
@@ -340,8 +339,7 @@ export async function createAndStoreApiKey(
       // Save config
       saveGlobalConfig(config)
 
-      // Reset the Anthropic client to force creation with new API key
-      resetAnthropicClient()
+      // API key is stored in config and will be picked up by providers on next use
 
       return apiKey
     }

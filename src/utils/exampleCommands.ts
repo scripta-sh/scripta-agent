@@ -6,7 +6,9 @@ import {
 } from './config.js'
 import { env } from './env'
 import { getCwd } from './state'
-import { queryHaiku } from '../services/claude'
+import { llmService } from '../core/providers'
+import { randomUUID } from 'crypto'
+import { UserMessage } from '../query'
 import { exec } from 'child_process'
 import { logError } from './log'
 import { memoize, sample } from 'lodash-es'
@@ -39,12 +41,34 @@ async function getFrequentlyModifiedFiles(): Promise<string[]> {
       )
       filenames += '\n\nFiles modified by other users:\n' + allFilenames
     }
-    const response = await queryHaiku({
-      systemPrompt: [
-        "You are an expert at analyzing git history. Given a list of files and their modification counts, return exactly five filenames that are frequently modified and represent core application logic (not auto-generated files, dependencies, or configuration). Make sure filenames are diverse, not all in the same folder, and are a mix of user and other users. Return only the filenames' basenames (without the path) separated by newlines with no explanation.",
-      ],
-      userPrompt: filenames,
-    })
+    // Create a user message
+    const userMessage: UserMessage = {
+      type: 'user',
+      message: {
+        content: filenames,
+        role: 'user',
+        id: randomUUID(),
+        type: 'message',
+      },
+      uuid: randomUUID(),
+    };
+
+    // System prompt
+    const systemPrompt = [
+      "You are an expert at analyzing git history. Given a list of files and their modification counts, return exactly five filenames that are frequently modified and represent core application logic (not auto-generated files, dependencies, or configuration). Make sure filenames are diverse, not all in the same folder, and are a mix of user and other users. Return only the filenames' basenames (without the path) separated by newlines with no explanation.",
+    ];
+
+    // Call the provider service directly
+    const response = await llmService.query(
+      [userMessage],
+      systemPrompt,
+      1000, // Small token limit for efficiency
+      [],
+      new AbortController().signal,
+      {
+        model: 'claude-3-5-haiku-20241022', // Use a small, efficient model
+      }
+    );
 
     const content = response.message.content[0]
     if (!content || content.type !== 'text') return []

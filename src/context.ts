@@ -1,9 +1,9 @@
 import {
   getCurrentProjectConfig,
   saveCurrentProjectConfig,
+  GlobalConfig,
 } from './utils/config.js'
 import { logError } from './utils/log'
-import { getCodeStyle } from './utils/style'
 import { getCwd } from './utils/state'
 import { memoize, omit } from 'lodash-es'
 import { LSTool } from './tools/lsTool/lsTool'
@@ -17,17 +17,29 @@ import { existsSync } from 'fs'
 import { getSlowAndCapableModel } from './utils/model'
 import { lastX } from './utils/generators'
 import { getGitEmail } from './utils/user'
-import { PROJECT_FILE } from './constants/product'
+import { PROJECT_FILE } from './core/constants/product.js'
+
+export function getCodeStyle(config: GlobalConfig): string | null {
+  if (!config || !config.preferences || !config.preferences.codeStyle) {
+    return null
+  }
+  return `Coding Style:
+Use ${config.preferences.codeStyle.indentStyle} indentation (${config.preferences.codeStyle.indentSize} spaces).
+Maximum line length is ${config.preferences.codeStyle.maxLineLength} characters.
+Use ${config.preferences.codeStyle.quoteStyle} quotes for strings.
+Other guidelines: ${config.preferences.codeStyle.other || 'Follow standard practices for the language.'}`
+}
+
 /**
  * Find all KODING.md files in the current working directory
  */
-export async function getClaudeFiles(): Promise<string | null> {
+export async function getClaudeFiles(cwd: string): Promise<string | null> {
   const abortController = new AbortController()
   const timeout = setTimeout(() => abortController.abort(), 3000)
   try {
     const files = await ripGrep(
       ['--files', '--glob', join('**', '*', PROJECT_FILE)],
-      getCwd(),
+      cwd,
       abortController.signal,
     )
     if (!files.length) {
@@ -36,7 +48,7 @@ export async function getClaudeFiles(): Promise<string | null> {
 
     // Add instructions for additional KODING.md files
     return `NOTE: Additional ${PROJECT_FILE} files were found. When working in these directories, make sure to read and follow the instructions in the corresponding ${PROJECT_FILE} file:\n${files
-      .map(_ => path.join(getCwd(), _))
+      .map(_ => path.join(cwd, _))
       .map(_ => `- ${_}`)
       .join('\n')}`
   } catch (error) {
@@ -68,9 +80,9 @@ export function removeContext(key: string): void {
   saveCurrentProjectConfig({ ...projectConfig, context })
 }
 
-export const getReadme = memoize(async (): Promise<string | null> => {
+export const getReadme = memoize(async (cwd: string): Promise<string | null> => {
   try {
-    const readmePath = join(getCwd(), 'README.md')
+    const readmePath = join(cwd, 'README.md')
     if (!existsSync(readmePath)) {
       return null
     }
@@ -82,7 +94,7 @@ export const getReadme = memoize(async (): Promise<string | null> => {
   }
 })
 
-export const getGitStatus = memoize(async (): Promise<string | null> => {
+export const getGitStatus = memoize(async (cwd: string): Promise<string | null> => {
   if (process.env.NODE_ENV === 'test') {
     // Avoid cycles in tests
     return null
@@ -92,36 +104,37 @@ export const getGitStatus = memoize(async (): Promise<string | null> => {
   }
 
   try {
+    const gitEmail = (await getGitEmail()) || '';
     const [branch, mainBranch, status, log, authorLog] = await Promise.all([
       execFileNoThrow(
         'git',
         ['branch', '--show-current'],
-        undefined,
+        { cwd },
         undefined,
         false,
       ).then(({ stdout }) => stdout.trim()),
       execFileNoThrow(
         'git',
         ['rev-parse', '--abbrev-ref', 'origin/HEAD'],
-        undefined,
+        { cwd },
         undefined,
         false,
       ).then(({ stdout }) => stdout.replace('origin/', '').trim()),
       execFileNoThrow(
         'git',
         ['status', '--short'],
-        undefined,
+        { cwd },
         undefined,
         false,
       ).then(({ stdout }) => stdout.trim()),
       execFileNoThrow(
         'git',
         ['log', '--oneline', '-n', '5'],
-        undefined,
+        { cwd },
         undefined,
         false,
       ).then(({ stdout }) => stdout.trim()),
-      execFileNoThrow(
+      gitEmail ? execFileNoThrow(
         'git',
         [
           'log',
@@ -129,12 +142,12 @@ export const getGitStatus = memoize(async (): Promise<string | null> => {
           '-n',
           '5',
           '--author',
-          (await getGitEmail()) || '',
+          gitEmail,
         ],
-        undefined,
+        { cwd },
         undefined,
         false,
-      ).then(({ stdout }) => stdout.trim()),
+      ).then(({ stdout }) => stdout.trim()) : Promise.resolve(''),
     ])
     // Check if status has more than 200 lines
     const statusLines = status.split('\n').length
@@ -155,21 +168,20 @@ export const getGitStatus = memoize(async (): Promise<string | null> => {
  * This context is prepended to each conversation, and cached for the duration of the conversation.
  */
 export const getContext = memoize(
-  async (): Promise<{
+  async (cwd: string, config: GlobalConfig): Promise<{
     [k: string]: string
   }> => {
-    const codeStyle = getCodeStyle()
-    const projectConfig = getCurrentProjectConfig()
-    const dontCrawl = projectConfig.dontCrawlDirectory
+    const codeStyle = getCodeStyle(config)
+    const dontCrawl = config.dontCrawlDirectory
     const [gitStatus, directoryStructure, claudeFiles, readme] =
       await Promise.all([
-        getGitStatus(),
-        dontCrawl ? Promise.resolve('') : getDirectoryStructure(),
-        dontCrawl ? Promise.resolve('') : getClaudeFiles(),
-        getReadme(),
+        getGitStatus(cwd),
+        dontCrawl ? Promise.resolve('') : getDirectoryStructure(cwd),
+        dontCrawl ? Promise.resolve('') : getClaudeFiles(cwd),
+        getReadme(cwd),
       ])
     return {
-      ...projectConfig.context,
+      ...(config.context || {}),
       ...(directoryStructure ? { directoryStructure } : {}),
       ...(gitStatus ? { gitStatus } : {}),
       ...(codeStyle ? { codeStyle } : {}),
@@ -184,7 +196,7 @@ export const getContext = memoize(
  * tools like LS and View to get more information.
  */
 export const getDirectoryStructure = memoize(
-  async function (): Promise<string> {
+  async function (cwd: string): Promise<string> {
     let lines: string
     try {
       const abortController = new AbortController()
@@ -211,14 +223,12 @@ export const getDirectoryStructure = memoize(
         },
       )
       const result = await lastX(resultsGen)
-      lines = result.data
+      lines = typeof result?.data === 'string' ? result.data : 'Could not retrieve directory structure.';
     } catch (error) {
       logError(error)
-      return ''
+      lines = `Error retrieving directory structure: ${error instanceof Error ? error.message : String(error)}`
     }
 
-    return `Below is a snapshot of this project's file structure at the start of the conversation. This snapshot will NOT update during the conversation.
-
-${lines}`
+    return `Below is a snapshot of this project's file structure (from CWD: ${cwd}) at the start of the conversation. This snapshot will NOT update during the conversation.\n\n${lines}`
   },
 )

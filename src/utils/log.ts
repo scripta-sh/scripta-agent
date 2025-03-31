@@ -6,8 +6,8 @@ import { randomUUID } from 'crypto'
 import envPaths from 'env-paths'
 import { promises as fsPromises } from 'fs'
 import type { LogOption, SerializedMessage } from '../types/logs'
-import { MACRO } from '../constants/macros'
-import { PRODUCT_COMMAND } from '../constants/product'
+import { MACRO } from '../core/constants/macros'
+import { PRODUCT_COMMAND } from '../core/constants/product'
 import chalk from 'chalk'
 
 // Add a new utility for structured logging

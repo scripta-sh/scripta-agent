@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { verifyApiKey } from '../services/claude'
+import { llmService } from '../core/providers'
 import { getAnthropicApiKey, isDefaultApiKey } from '../utils/config'
 
 export type VerificationStatus =
@@ -36,7 +36,7 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
   //   }
 
   //   try {
-  //     const isValid = await verifyApiKey(apiKey)
+  //     const isValid = await llmService.verifyApiKey('anthropic', apiKey)
   //     const newStatus = isValid ? 'valid' : 'invalid'
   //     setStatus(newStatus)
   //     return

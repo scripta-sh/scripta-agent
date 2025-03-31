@@ -1,10 +1,11 @@
 import { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import { AssistantMessage, BinaryFeedbackResult } from '../../query'
-import { MAIN_QUERY_TEMPERATURE } from '../../services/claude'
 import { getDynamicConfig, logEvent } from '../../services/statsig'
-
 import { isEqual, zip } from 'lodash-es'
 import { getGitState } from '../../utils/git'
+
+// Define standard temperature value
+const MAIN_QUERY_TEMPERATURE = 1.0
 
 export type BinaryFeedbackChoice =
   | 'prefer-left'

@@ -1,15 +1,58 @@
 // src/core/ScriptaCore.ts
 
 // Define required types from other modules (will need adjustment)
-import { Message, UserMessage, AssistantMessage } from '../query'; // Assuming Message types from query.ts
+import { Message, UserMessage, AssistantMessage } from '../core/agent'; // Using agent types directly
 import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage, CANCEL_MESSAGE } from '../utils/messages.js';
 import { Tool } from '../Tool';
 import { getContext } from '../context'; // For generating context string
-import { formatSystemPromptWithContext } from '../services/claude'; // <-- Correct path, no extension
-import { getSystemPrompt } from '../constants/prompts'; // <-- Remove .ts
-import { getSlowAndCapableModel } from '../utils/model'; // <-- Remove .ts
-// Import LLM callers and related types/utils
-import { queryAnthropicModel } from '../services/claude'; // Assuming this is the correct path now
+import { getSystemPrompt } from './constants/prompts';
+import { getSlowAndCapableModel } from '../utils/model';
+import { llmService } from './providers'; // Import the provider service
+// Define formatSystemPromptWithContext here instead of importing from claude.ts
+function formatSystemPromptWithContext(
+  systemPrompt: string[],
+  context: { [k: string]: string },
+): string[] {
+  if (Object.entries(context).length === 0) {
+    return systemPrompt;
+  }
+
+  return [
+    ...systemPrompt,
+    `\nAs you answer the user's questions, you can use the following context:\n`,
+    ...Object.entries(context).map(
+      ([key, value]) => `<context name="${key}">${value}</context>`,
+    ),
+  ];
+}
+
+/**
+ * Helper function to query the LLM service using the provider system
+ * This bridges the old claude.ts interface with the new provider system
+ */
+async function queryLlmService(
+  messages: (UserMessage | AssistantMessage)[],
+  systemPrompt: string[],
+  maxTokens: number,
+  tools: Tool[],
+  signal: AbortSignal,
+  options: {
+    model?: string;
+    prependCLISysprompt?: boolean;
+    dangerouslySkipPermissions?: boolean;
+    [key: string]: any;
+  }
+): Promise<AssistantMessage> {
+  // Simply forward to the llmService from the provider system
+  return llmService.query(
+    messages,
+    systemPrompt,
+    maxTokens,
+    tools,
+    signal,
+    options
+  );
+}
 // import { queryOpenAI } from '../services/claude'; // Or wherever it lives
 // Need Command type and hasCommand function (define/import later)
 // import { Command, hasCommand } from '../commands';
@@ -129,6 +172,17 @@ export async function* processInput(
         let userMessage: Message | null = null;
         let inputType: 'prompt' | 'slashCommand' | 'shellCommand' = 'prompt';
 
+        // Destructure CWD and Config from initialState *before* the try block
+        const { currentWorkingDirectory, config } = initialState;
+
+        // Validate required state properties
+        if (!currentWorkingDirectory) {
+             throw new Error("Current working directory is missing from session state.");
+        }
+        if (!config) {
+             throw new Error("Configuration is missing from session state.");
+        }
+
         // --- Input Processing Logic --- 
         // Note: 'bash' mode distinction is removed for now, relying on '!' prefix
         if (userInput.startsWith('!')) {
@@ -196,9 +250,12 @@ export async function* processInput(
         if (inputType === 'prompt' || inputType === 'shellCommand') {
             try {
                 // 1. Get System Prompt parts and Context
+                // CWD and Config are already destructured above
+
                 const [baseSystemPromptParts, contextData] = await Promise.all([
-                    getSystemPrompt(),
-                    getContext(await sessionManager.getCurrentWorkingDirectory(sessionId)),
+                    getSystemPrompt(), // Assuming this doesn't need session state
+                    // Call getContext with cwd and config from session state
+                    getContext(currentWorkingDirectory, config),
                 ]);
 
                 // 2. Format full system prompt (store string[])
@@ -229,9 +286,8 @@ export async function* processInput(
                   })
                 );
 
-                // 4. Determine model - Use largeModelName from config
-                // modelToUse = initialState.config?.slowAndCapableModel ?? await getSlowAndCapableModel();
-                modelToUse = initialState.config?.largeModelName ?? await getSlowAndCapableModel();
+                // 4. Determine model - Use largeModelName from config retrieved from session state
+                modelToUse = config?.largeModelName ?? await getSlowAndCapableModel();
 
             } catch (e) {
                  conditionalLog("[ScriptaCore] Error preparing LLM call data:", e);
@@ -243,24 +299,21 @@ export async function* processInput(
 
             // --- Start: Call LLM Service (Moved from query.ts) ---
             try {
-                const provider = initialState.config?.primaryProvider ?? 'anthropic'; // Default to anthropic
+                // Determine provider and model from config retrieved from session state
+                const provider = config?.primaryProvider ?? 'anthropic';
+                // modelToUse is already determined above the try block
 
-                // All providers are now handled by queryAnthropicModel
-                // which internally dispatches to the appropriate provider
-                assistantResponse = await queryAnthropicModel(
+                // Call queryLlmService directly
+                assistantResponse = await queryLlmService(
                     normalizedMessages,
                     formattedSystemPromptParts,
-                    // Use largeModelMaxTokens from config
-                    // initialState.config?.maxThinkingTokens ?? 0,
-                    initialState.config?.largeModelMaxTokens ?? 0,
-                    initialState.tools,
+                    config?.largeModelMaxTokens ?? 0,
+                    initialState.tools, 
                     abortController.signal,
                     {
-                        // Remove dangerouslySkipPermissions - handled by caller/PermissionHandler
-                        // dangerouslySkipPermissions:
-                        //     initialState.config?.dangerouslySkipPermissions ?? false,
-                        model: modelToUse,
-                        prependCLISysprompt: true,
+                        model: modelToUse, 
+                        // provider: provider, // Assuming queryLlmService infers from model
+                        prependCLISysprompt: true, 
                     },
                 );
 
@@ -347,38 +400,32 @@ export async function* processInput(
                     while (continueLlmCalls) {
                     // 1. Create the tool result message (User role as per Anthropic spec)
                         const toolResultMessage = createUserMessage(currentToolResults);
-                    // await sessionManager.addMessage(sessionId, toolResultMessage); // Incorrect
                     currentMessagesForTurn.push(toolResultMessage); // Add to local copy
 
                     // 2. Normalize messages again - Use local copy
-                        // const currentMessages = await sessionManager.getMessages(sessionId);
                         normalizedMessages = normalizeMessagesForAPI(currentMessagesForTurn);
         
-                        // 3. Call LLM service again
-                        const provider = initialState.config?.primaryProvider ?? 'anthropic';
-                    let nextAssistantResponse: AssistantMessage | null = null;
+                    // 3. Call LLM service again
+                        // Get provider and model from config (modelToUse already available from initial call)
+                        const provider = config?.primaryProvider ?? 'anthropic'; 
+                        let nextAssistantResponse: AssistantMessage | null = null;
 
-                    // All providers are now handled by queryAnthropicModel
-                    // which internally dispatches to the appropriate provider
-                    nextAssistantResponse = await queryAnthropicModel(
-                        normalizedMessages,
-                        formattedSystemPromptParts, // Re-use the same system prompt
-                        // Use largeModelMaxTokens from config
-                        // initialState.config?.maxThinkingTokens ?? 0,
-                        initialState.config?.largeModelMaxTokens ?? 0,
-                        initialState.tools, // Pass tools again in case of nested tool use
-                        abortController.signal, // Re-use the same abort signal
-                        {
-                            // Remove dangerouslySkipPermissions
-                            // dangerouslySkipPermissions:
-                            //     initialState.config?.dangerouslySkipPermissions ?? false,
-                            model: modelToUse, // Re-use the determined model
-                            prependCLISysprompt: true,
-                        },
-                    );
+                        // Call queryLlmService directly
+                        nextAssistantResponse = await queryLlmService(
+                            normalizedMessages,
+                            formattedSystemPromptParts, 
+                            config?.largeModelMaxTokens ?? 0,
+                            initialState.tools, 
+                            abortController.signal, 
+                            {
+                                model: modelToUse, 
+                                // provider: provider, // Assuming queryLlmService infers from model
+                                prependCLISysprompt: true,
+                            },
+                        );
 
                         // 5. Process the response
-                    if (nextAssistantResponse) {
+                        if (nextAssistantResponse) {
                             // await sessionManager.addMessage(sessionId, nextAssistantResponse); // Incorrect
                             currentMessagesForTurn.push(nextAssistantResponse); // Add to local copy
 

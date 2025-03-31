@@ -2,7 +2,7 @@ import { Box, Text } from 'ink'
 import React from 'react'
 import { useInterval } from '../hooks/useInterval'
 import { getTheme } from '../utils/theme'
-import { BLACK_CIRCLE } from '../constants/figures'
+import { BLACK_CIRCLE } from '../core/constants/figures'
 
 type Props = {
   isError: boolean

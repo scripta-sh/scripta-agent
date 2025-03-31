@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Command } from '../commands'
 import { Doctor } from '../screens/Doctor'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 
 const doctor: Command = {
   name: 'doctor',

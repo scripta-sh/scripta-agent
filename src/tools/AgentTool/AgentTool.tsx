@@ -6,10 +6,10 @@ import * as React from 'react'
 import { z } from 'zod'
 import { Tool } from '../../Tool'
 import { FallbackToolUseRejectedMessage } from '../../components/FallbackToolUseRejectedMessage'
-import { getAgentPrompt } from '../../constants/prompts'
+import { getAgentPrompt } from '../../core/constants/prompts'
 import { getContext } from '../../context'
 import { hasPermissionsToUseTool } from '../../permissions'
-import { AssistantMessage, Message as MessageType, query } from '../../query'
+import { AssistantMessage, Message as MessageType, query } from '../../core/agent'
 import { formatDuration, formatNumber } from '../../utils/format'
 import {
   getMessagesPath,

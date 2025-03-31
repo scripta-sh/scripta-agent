@@ -18,7 +18,7 @@ import { GrepTool } from '../../tools/GrepTool/GrepTool'
 import { LSTool } from '../../tools/lsTool/lsTool'
 import { FileReadTool } from '../../tools/FileReadTool/FileReadTool'
 import { NotebookReadTool } from '../../tools/NotebookReadTool/NotebookReadTool'
-import { PRODUCT_NAME } from '../../constants/product'
+import { PRODUCT_NAME } from '../../core/constants/product'
 
 function permissionComponentForTool(tool: Tool) {
   switch (tool) {

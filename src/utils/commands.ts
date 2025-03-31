@@ -1,7 +1,12 @@
 import { memoize } from 'lodash-es'
-import { API_ERROR_MESSAGE_PREFIX, queryHaiku } from '../services/claude'
+import { llmService } from '../core/providers'
+import { randomUUID } from 'crypto'
+import { UserMessage } from '../query'
+
+// Constants from old claude.ts
+const API_ERROR_MESSAGE_PREFIX = 'Provider error'
 import { type ControlOperator, parse, ParseEntry } from 'shell-quote'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 
 const SINGLE_QUOTE = '__SINGLE_QUOTE__'
 const DOUBLE_QUOTE = '__DOUBLE_QUOTE__'
@@ -115,13 +120,8 @@ const getCommandPrefix = memoize(
     command: string,
     abortSignal: AbortSignal,
   ): Promise<CommandPrefixResult | null> => {
-    const response = await queryHaiku({
-      systemPrompt: [
-        `Your task is to process Bash commands that an AI coding agent wants to run.
-
-This policy spec defines how to determine the prefix of a Bash command:`,
-      ],
-      userPrompt: `<policy_spec>
+    // Prepare the full prompt
+    const userPrompt = `<policy_spec>
 # ${PRODUCT_NAME} Code Bash command prefix detection
 
 This document defines risk levels for actions that the ${PRODUCT_NAME} agent may take. This classification system is part of a broader safety framework and is used to determine when additional user confirmation or oversight may be needed.
@@ -173,10 +173,38 @@ Note that not every command has a prefix. If a command has no prefix, return "no
 ONLY return the prefix. Do not return any other text, markdown markers, or other content or formatting.
 
 Command: ${command}
-`,
-      signal: abortSignal,
-      enablePromptCaching: false,
-    })
+`;
+
+    // Create a user message
+    const userMessage: UserMessage = {
+      type: 'user',
+      message: {
+        content: userPrompt,
+        role: 'user',
+        id: randomUUID(),
+        type: 'message',
+      },
+      uuid: randomUUID(),
+    };
+
+    // System prompt
+    const systemPrompt = [
+      `Your task is to process Bash commands that an AI coding agent wants to run.
+
+This policy spec defines how to determine the prefix of a Bash command:`,
+    ];
+
+    // Call the provider service directly
+    const response = await llmService.query(
+      [userMessage],
+      systemPrompt,
+      1000, // Small token limit for efficiency
+      [],
+      abortSignal,
+      {
+        model: 'claude-3-5-haiku-20241022', // Use a small, efficient model
+      }
+    );
 
     const prefix =
       typeof response.message.content === 'string'

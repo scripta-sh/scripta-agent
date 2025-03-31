@@ -19,7 +19,7 @@ import {
 import { PermissionRequestTitle } from '../components/permissions/PermissionRequestTitle'
 import PromptInput from '../components/PromptInput'
 import { Spinner } from '../components/Spinner'
-import { getSystemPrompt } from '../constants/prompts'
+import { getSystemPrompt } from '../core/constants/prompts.js'
 import { getContext } from '../context'
 import { getTotalCost, useCostSummary } from '../cost-tracker'
 import { useLogStartupTime } from '../hooks/useLogStartupTime'

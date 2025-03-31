@@ -1,7 +1,7 @@
 import React from 'react'
 import { Text } from 'ink'
 import Link from 'ink-link'
-import { PRODUCT_NAME, PRODUCT_COMMAND } from '../constants/product'
+import { PRODUCT_NAME, PRODUCT_COMMAND } from '../core/constants/product'
 
 export function MCPServerDialogCopy(): React.ReactNode {
   return (

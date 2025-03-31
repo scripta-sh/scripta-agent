@@ -11,7 +11,7 @@ import {
 } from '../utils/autoUpdater.js'
 import { saveGlobalConfig, getGlobalConfig } from '../utils/config'
 import { logEvent } from '../services/statsig'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 import { PressEnterToContinue } from '../components/PressEnterToContinue'
 
 type Props = {

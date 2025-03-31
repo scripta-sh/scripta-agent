@@ -1,10 +1,10 @@
 import { Command } from '../commands'
-import { PRODUCT_COMMAND, PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_COMMAND, PRODUCT_NAME } from '../core/constants/product'
 import * as React from 'react'
 import { Box, Text, useInput } from 'ink'
 import { getTheme } from '../utils/theme'
 import { PressEnterToContinue } from './PressEnterToContinue'
-import { MACRO } from '../constants/macros'
+import { MACRO } from '../core/constants/macros'
 export function Help({
   commands,
   onClose,

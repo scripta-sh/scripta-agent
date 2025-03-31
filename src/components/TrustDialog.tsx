@@ -6,7 +6,7 @@ import {
   saveCurrentProjectConfig,
   getCurrentProjectConfig,
 } from '../utils/config.js'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 import { logEvent } from '../services/statsig'
 import { useExitOnCtrlCD } from '../hooks/useExitOnCtrlCD'
 import { homedir } from 'os'

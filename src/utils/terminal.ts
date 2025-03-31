@@ -1,6 +1,7 @@
-import { queryHaiku } from '../services/claude'
 import { safeParseJSON } from './json'
 import { logError } from './log'
+import { llmService } from '../core/providers'
+import crypto from 'crypto'
 
 export function setTerminalTitle(title: string): void {
   if (process.platform === 'win32') {
@@ -12,18 +13,40 @@ export function setTerminalTitle(title: string): void {
 
 export async function updateTerminalTitle(message: string): Promise<void> {
   try {
-    const result = await queryHaiku({
-      systemPrompt: [
-        "Analyze if this message indicates a new conversation topic. If it does, extract a 2-3 word title that captures the new topic. Format your response as a JSON object with two fields: 'isNewTopic' (boolean) and 'title' (string, or null if isNewTopic is false). Only include these fields, no other text.",
-      ],
-      userPrompt: message,
-      enablePromptCaching: true,
-    })
+    const systemPrompt = [
+      "Analyze if this message indicates a new conversation topic. If it does, extract a 2-3 word title that captures the new topic. Format your response as a JSON object with two fields: 'isNewTopic' (boolean) and 'title' (string, or null if isNewTopic is false). Only include these fields, no other text.",
+    ];
+    
+    const userMessage = {
+      type: 'user',
+      message: {
+        content: message,
+        role: 'user',
+        id: Date.now().toString(),
+        type: 'message'
+      },
+      uuid: crypto.randomUUID()
+    };
+    
+    const result = await llmService.query(
+      [userMessage], 
+      systemPrompt, 
+      1000, // Small token limit for efficiency
+      [], 
+      new AbortController().signal,
+      {
+        model: 'claude-3-5-haiku-20241022', // Use a small, efficient model
+      }
+    );
 
-    const content = result.message.content
-      .filter(_ => _.type === 'text')
-      .map(_ => _.text)
-      .join('')
+    const content = Array.isArray(result.message.content)
+      ? result.message.content
+        .filter(_ => _.type === 'text')
+        .map(_ => _.text)
+        .join('')
+      : typeof result.message.content === 'string'
+        ? result.message.content
+        : '';
 
     const response = safeParseJSON(content)
     if (

@@ -3,7 +3,7 @@ import { Box, Text, useInput } from 'ink'
 import { getTheme } from '../utils/theme'
 import { Select } from './CustomSelect/select'
 import { Newline } from 'ink'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 import { useExitOnCtrlCD } from '../hooks/useExitOnCtrlCD'
 import {
   getGlobalConfig,
@@ -11,7 +11,7 @@ import {
   addApiKey,
   ProviderType,
 } from '../utils/config.js'
-import models, { providers } from '../constants/models'
+import models, { providers } from '../core/constants/models'
 import TextInput from './TextInput'
 import OpenAI from 'openai'
 import chalk from 'chalk'
@@ -249,8 +249,41 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     // Reset the selected model when changing providers to avoid invalid model names
     setSelectedModel('')
     
-    // Reset API key and edited state when changing providers
-    setApiKey('')
+    // Try to get existing API key for this provider
+    let existingKey = '';
+    
+    switch (providerType) {
+      case 'anthropic':
+        existingKey = config.anthropicApiKey || config.primaryApiKey || '';
+        break;
+      case 'openai':
+        existingKey = config.openaiApiKey || '';
+        break;
+      case 'mistral':
+        existingKey = config.mistralApiKey || '';
+        break;
+      case 'deepseek':
+        existingKey = config.deepseekApiKey || '';
+        break;
+      case 'xai':
+        existingKey = config.xaiApiKey || '';
+        break;
+      case 'groq':
+        existingKey = config.groqApiKey || '';
+        break;
+      case 'gemini':
+        existingKey = config.geminiApiKey || '';
+        break;
+      case 'ollama':
+        existingKey = config.ollamaApiKey || '';
+        break;
+      case 'custom':
+        existingKey = config.customApiKey || '';
+        break;
+    }
+    
+    // Set API key to existing value or empty string
+    setApiKey(existingKey);
     setApiKeyEdited(false)
     
     if (provider === 'custom') {
@@ -509,7 +542,39 @@ export function ModelSelector({ onDone: onDoneProp, abortController }: Props): R
     // Always update the primary provider and set primaryApiKey
     newConfig.primaryProvider = provider
     if (apiKey) {
+      // Store in both primaryApiKey for backward compatibility and in provider-specific field
       newConfig.primaryApiKey = apiKey
+      
+      // Also store in the provider-specific field
+      switch (provider) {
+        case 'anthropic':
+          newConfig.anthropicApiKey = apiKey;
+          break;
+        case 'openai':
+          newConfig.openaiApiKey = apiKey;
+          break;
+        case 'mistral':
+          newConfig.mistralApiKey = apiKey;
+          break;
+        case 'deepseek':
+          newConfig.deepseekApiKey = apiKey;
+          break;
+        case 'xai':
+          newConfig.xaiApiKey = apiKey;
+          break;
+        case 'groq':
+          newConfig.groqApiKey = apiKey;
+          break;
+        case 'gemini':
+          newConfig.geminiApiKey = apiKey;
+          break;
+        case 'ollama':
+          newConfig.ollamaApiKey = apiKey;
+          break;
+        case 'custom':
+          newConfig.customApiKey = apiKey;
+          break;
+      }
     }
     
     // Set API key requirement - only for providers that need API keys

@@ -1,16 +1,26 @@
-import { env } from '../utils/env'
-import { getIsGit } from '../utils/git'
+import { env } from '../../utils/env'
+import { getIsGit } from '../../utils/git'
 import {
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
-} from '../utils/messages.js'
-import { getCwd } from '../utils/state'
+} from '../../utils/messages.js'
+import { getCwd } from '../../utils/state'
 import { PRODUCT_NAME, PROJECT_FILE, PRODUCT_COMMAND } from './product'
-import { BashTool } from '../tools/BashTool/BashTool'
-import { getSlowAndCapableModel } from '../utils/model'
+import { BashTool } from '../../tools/BashTool/BashTool'
+import { getSlowAndCapableModel } from '../../utils/model'
 import { MACRO } from './macros'
 export function getCLISyspromptPrefix(): string {
   return `You are ${PRODUCT_NAME}, a CLI for coding.`
+}
+
+/**
+ * Split out the first block of the system prompt as the "prefix" for API
+ * Extracted from claude.ts
+ */
+export function splitSysPromptPrefix(systemPrompt: string[]): string[] {
+  const systemPromptFirstBlock = systemPrompt[0] || '';
+  const systemPromptRest = systemPrompt.slice(1);
+  return [systemPromptFirstBlock, systemPromptRest.join('\n')].filter(Boolean);
 }
 
 export async function getSystemPrompt(): Promise<string[]> {

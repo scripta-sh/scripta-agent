@@ -13,7 +13,7 @@ import { AbortError } from './utils/errors'
 import { logError } from './utils/log'
 import { grantWritePermissionForOriginalDir } from './utils/permissions/filesystem'
 import { getCwd } from './utils/state'
-import { PRODUCT_NAME } from './constants/product'
+import { PRODUCT_NAME } from './core/constants/product'
 import { renderToolUseMessage } from './cli/renderers/toolRenderers'
 
 // Commands that are known to be safe for execution

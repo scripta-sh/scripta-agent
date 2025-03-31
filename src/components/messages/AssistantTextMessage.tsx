@@ -9,8 +9,8 @@ import {
   API_ERROR_MESSAGE_PREFIX,
   CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE,
   INVALID_API_KEY_ERROR_MESSAGE,
-  PROMPT_TOO_LONG_ERROR_MESSAGE,
-} from '../../services/claude.js'
+  PROMPT_TOO_LONG_ERROR_MESSAGE
+} from '../../core/constants/providerErrors'
 import {
   CANCEL_MESSAGE,
   INTERRUPT_MESSAGE,
@@ -18,7 +18,7 @@ import {
   isEmptyMessageText,
   NO_RESPONSE_REQUESTED,
 } from '../../utils/messages.js'
-import { BLACK_CIRCLE } from '../../constants/figures'
+import { BLACK_CIRCLE } from '../../core/constants/figures'
 import { applyMarkdown } from '../../utils/markdown'
 import { useTerminalSize } from '../../hooks/useTerminalSize'
 

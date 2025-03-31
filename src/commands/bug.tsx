@@ -1,7 +1,7 @@
 import { Command } from '../commands'
 import { Bug } from '../components/Bug'
 import * as React from 'react'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 
 const bug = {
   type: 'local-jsx',

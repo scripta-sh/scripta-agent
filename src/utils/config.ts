@@ -7,7 +7,7 @@ import { getCwd } from './state'
 import { randomBytes } from 'crypto'
 import { safeParseJSON } from './json'
 import { checkGate, logEvent } from '../services/statsig'
-import { GATE_USE_EXTERNAL_UPDATER } from '../constants/betas'
+import { GATE_USE_EXTERNAL_UPDATER } from '../core/constants/betas'
 import { ConfigParseError } from './errors'
 import type { ThemeNames } from './theme'
 import { getSessionState, setSessionState } from './sessionState'
@@ -121,8 +121,22 @@ export type GlobalConfig = {
     approved?: string[]
     rejected?: string[]
   }
+  // Primary API key and provider
   primaryApiKey?: string
   primaryProvider?: ProviderType
+  
+  // Provider-specific API keys
+  anthropicApiKey?: string
+  openaiApiKey?: string
+  mistralApiKey?: string
+  deepseekApiKey?: string
+  xaiApiKey?: string
+  groqApiKey?: string
+  geminiApiKey?: string
+  ollamaApiKey?: string
+  customApiKey?: string
+  
+  // Model configuration
   largeModelBaseURL?: string
   largeModelName?: string
   largeModelApiKeyRequired?: boolean 
@@ -138,6 +152,8 @@ export type GlobalConfig = {
   smallModelMaxTokens?: number
   largeModelMaxTokens?: number
   maxTokens?: number
+  
+  // Other settings
   hasAcknowledgedCostThreshold?: boolean
   oauthAccount?: AccountInfo
   iterm2KeyBindingInstalled?: boolean // Legacy - keeping for backward compatibility
@@ -634,6 +650,12 @@ export function listConfigForCLI(global: boolean): object {
 export function getProviderApiKey(provider: ProviderType, type: 'small' | 'large' = 'large'): string | null {
   const config = getGlobalConfig();
   
+  // First check provider-specific API key
+  const specificKey = getProviderSpecificApiKey(provider);
+  if (specificKey) {
+    return specificKey;
+  }
+  
   // Check if provider matches the primary provider and has primaryApiKey
   if (config.primaryProvider === provider && config.primaryApiKey) {
     return config.primaryApiKey;
@@ -646,6 +668,39 @@ export function getProviderApiKey(provider: ProviderType, type: 'small' | 'large
   }
   
   return null;
+}
+
+/**
+ * Get the provider-specific API key from global config
+ * 
+ * @param provider The provider to get the API key for
+ * @returns The API key or undefined if not found
+ */
+export function getProviderSpecificApiKey(provider: ProviderType): string | undefined {
+  const config = getGlobalConfig();
+  
+  switch (provider) {
+    case 'anthropic':
+      return config.anthropicApiKey;
+    case 'openai':
+      return config.openaiApiKey;
+    case 'mistral':
+      return config.mistralApiKey;
+    case 'deepseek':
+      return config.deepseekApiKey;
+    case 'xai':
+      return config.xaiApiKey;
+    case 'groq':
+      return config.groqApiKey;
+    case 'gemini':
+      return config.geminiApiKey;
+    case 'ollama':
+      return config.ollamaApiKey;
+    case 'custom':
+      return config.customApiKey;
+    default:
+      return undefined;
+  }
 }
 
 export function addApiKey(config: GlobalConfig, key: string, type: 'small' | 'large'): void {

@@ -288,7 +288,7 @@ async function getOrCreateSession(sessionId?: string, workingDirectory?: string)
  */
 async function createNewSession(workingDirectory?: string): Promise<ExecutionContext> {
   // Import these dynamically to avoid circular dependencies
-  const { getSystemPrompt } = await import('../constants/prompts')
+  const { getSystemPrompt } = await import('../core/constants/prompts')
   const { getEnvInfo } = await import('../utils/env')
   const { getCommandRegistry } = await import('../commands')
   const { getCwd } = await import('../utils/state') 

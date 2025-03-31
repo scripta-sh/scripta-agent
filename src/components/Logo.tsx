@@ -1,7 +1,7 @@
 import { Box, Text, Newline } from 'ink'
 import * as React from 'react'
 import { getTheme } from '../utils/theme'
-import { PRODUCT_NAME } from '../constants/product'
+import { PRODUCT_NAME } from '../core/constants/product'
 import { isDefaultApiKey, getAnthropicApiKey, getGlobalConfig } from '../utils/config'
 import { getCwd } from '../utils/state'
 import { AsciiLogo } from './AsciiLogo'

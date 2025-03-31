@@ -1,9 +1,11 @@
 import { Box, Text, useInput } from 'ink'
 import * as React from 'react'
 import { useState, useCallback, useEffect } from 'react'
+import { randomUUID } from 'crypto'
 import { getTheme } from '../utils/theme'
 import { getMessagesGetter } from '../messages'
 import type { Message } from '../query'
+import { UserMessage } from '../query'
 import TextInput from './TextInput'
 import { logError, getInMemoryErrors } from '../utils/log'
 import { env } from '../utils/env'
@@ -12,12 +14,13 @@ import { useTerminalSize } from '../hooks/useTerminalSize'
 import { getAnthropicApiKey, getGlobalConfig } from '../utils/config'
 import { USER_AGENT } from '../utils/http'
 import { logEvent } from '../services/statsig'
-import { PRODUCT_NAME } from '../constants/product'
-import { API_ERROR_MESSAGE_PREFIX, queryHaiku } from '../services/claude'
+import { PRODUCT_NAME } from '../core/constants/product'
+import { llmService } from '../core/providers'
+import { API_ERROR_MESSAGE_PREFIX } from '../core/constants/providerErrors'
 import { openBrowser } from '../utils/browser'
 import { useExitOnCtrlCD } from '../hooks/useExitOnCtrlCD'
-import { MACRO } from '../constants/macros'
-import { GITHUB_ISSUES_REPO_URL } from '../constants/product'
+import { MACRO } from '../core/constants/macros'
+import { GITHUB_ISSUES_REPO_URL } from '../core/constants/product'
 
 type Props = {
   onDone(result: string): void
@@ -288,20 +291,47 @@ ${description}
 }
 
 async function generateTitle(description: string): Promise<string> {
-  const response = await queryHaiku({
-    systemPrompt: [
+  try {
+    const config = getGlobalConfig();
+    const userMessage: UserMessage = {
+      type: 'user',
+      message: {
+        content: description,
+        role: 'user',
+        id: randomUUID(),
+        type: 'message',
+      },
+      uuid: randomUUID(),
+    };
+    
+    const systemPrompt = [
       'Generate a concise issue title (max 80 chars) that captures the key point of this feedback. Do not include quotes or prefixes like "Feedback:" or "Issue:". If you cannot generate a title, just use "User Feedback".',
-    ],
-    userPrompt: description,
-  })
-  const title =
-    response.message.content[0]?.type === 'text'
-      ? response.message.content[0].text
-      : 'Bug Report'
-  if (title.startsWith(API_ERROR_MESSAGE_PREFIX)) {
+    ];
+
+    const response = await llmService.query(
+      [userMessage],
+      systemPrompt,
+      1000, // Small token limit is efficient for this task
+      [],
+      new AbortController().signal,
+      {
+        model: config.smallModelName, // Use configured small model
+        prependCLISysprompt: true,
+      }
+    );
+    
+    const title =
+      response.message.content[0]?.type === 'text'
+        ? response.message.content[0].text
+        : 'Bug Report'
+    if (title.startsWith(API_ERROR_MESSAGE_PREFIX)) {
+      return `Bug Report: ${description.slice(0, 60)}${description.length > 60 ? '...' : ''}`
+    }
+    return title
+  } catch (error) {
+    logError(error);
     return `Bug Report: ${description.slice(0, 60)}${description.length > 60 ? '...' : ''}`
   }
-  return title
 }
 
 async function submitFeedback(
