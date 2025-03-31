@@ -6,6 +6,7 @@ import ProjectOnboarding, {
 import { CostThresholdDialog } from '../components/CostThresholdDialog'
 import * as React from 'react'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useTerminalSize } from '../hooks/useTerminalSize'
 import { Command } from '../commands'
 import { Logo } from '../components/Logo'
 import { Message } from '../components/Message'
@@ -15,6 +16,7 @@ import {
   PermissionRequest,
   ToolUseConfirm,
 } from '../components/permissions/PermissionRequest'
+import { PermissionRequestTitle } from '../components/permissions/PermissionRequestTitle'
 import PromptInput from '../components/PromptInput'
 import { Spinner } from '../components/Spinner'
 import { getSystemPrompt } from '../constants/prompts'
@@ -24,12 +26,20 @@ import { useLogStartupTime } from '../hooks/useLogStartupTime'
 import { addToHistory } from '../history'
 import { useCancelRequest } from '../hooks/useCancelRequest'
 import { useLogMessages } from '../hooks/useLogMessages'
+import { getTheme } from '../utils/theme'
+import { HighlightedCode } from '../components/HighlightedCode'
+import { StructuredDiff } from '../components/StructuredDiff'
+import { intersperse } from '../utils/array'
+import { existsSync, readFileSync } from 'fs'
+import { relative, basename, extname } from 'path'
+import { getPatch } from '../utils/diff'
+import { detectFileEncoding } from '../utils/file'
 import {
   type AssistantMessage,
   type BinaryFeedbackResult,
   type Message as MessageType,
   type ProgressMessage,
-  query,
+  // Removed "query" import - we're using ScriptaCore's processInput instead
 } from '../query'
 import type { WrappedClient } from '../services/mcpClient'
 import type { Tool } from '../Tool'
@@ -48,7 +58,7 @@ import {
   type NormalizedMessage,
   normalizeMessages,
   normalizeMessagesForAPI,
-  processUserInput,
+  // Removed processUserInput - using ScriptaCore's processInput instead
   reorderMessages,
   createAssistantMessage,
   createAssistantAPIErrorMessage,
@@ -59,12 +69,16 @@ import { clearTerminal, updateTerminalTitle } from '../utils/terminal'
 import { BinaryFeedback } from '../components/binary-feedback/BinaryFeedback'
 import { getMaxThinkingTokens } from '../utils/thinking'
 import { CliPermissionHandler } from '../cli/permissions/CliPermissionHandler'
-import { getOriginalCwd } from '../utils/state'
+import { getCwd, getOriginalCwd } from '../utils/state'
 import { getClients } from '../services/mcpClient.js'
-import { processInput, SessionState, CoreEvent } from '../core/ScriptaCore'
+import { processInput, CoreEvent } from '../core/ScriptaCore'
 import { IPermissionHandler, PermissionHandlerContext } from "../core/permissions/IPermissionHandler";
 import { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { renderToolResultMessage } from '../cli/renderers/toolRenderers'
+import { CliSessionManager } from '../cli/session/CliSessionManager'
+import { setMessagesGetter, setMessagesSetter } from '../messages'
+import chalk from 'chalk'
+import { createComponentLogger } from '../utils/log'
 
 type Props = {
   commands: Command[]
@@ -101,32 +115,258 @@ interface PermissionPromptProps {
 function PermissionPrompt({ request }: PermissionPromptProps) {
     const { exit } = useApp();
     const [selection, setSelection] = useState<'allow' | 'deny' | null>(null);
+    const { columns = 80 } = useTerminalSize();
+    const theme = getTheme();
+
+    // Add debug logging when component renders
+    console.debug(`[PermissionPrompt] Rendering prompt for tool: ${request.toolName}`);
 
     useInput((input, key) => {
         if (selection) return; // Already decided
 
         if (input === 'y' || input === 'Y') {
+            console.debug(`[PermissionPrompt] User selected ALLOW for ${request.toolName}`);
             setSelection('allow');
             request.onAllow();
         } else if (input === 'n' || input === 'N') {
+            console.debug(`[PermissionPrompt] User selected DENY for ${request.toolName}`);
             setSelection('deny');
             request.onDeny();
         } else if (key.escape) {
+            console.debug(`[PermissionPrompt] User pressed ESC to deny ${request.toolName}`);
             setSelection('deny'); // Treat escape as deny
             request.onDeny();
         }
     });
 
+    // Render the tool input details based on tool type
+    const renderToolInput = () => {
+        switch (request.toolName) {
+            case 'Bash':
+                return (
+                    <Box flexDirection="column" marginTop={1} paddingX={2}>
+                        <Text color={theme.secondaryText}>Command:</Text>
+                        <Box marginLeft={2} marginTop={1}>
+                            <HighlightedCode
+                                code={request.toolInput.command || ''}
+                                language="bash"
+                            />
+                        </Box>
+                    </Box>
+                );
+            case 'Edit': {
+                const { file_path, old_string, new_string } = request.toolInput;
+                const file = existsSync(file_path) ? readFileSync(file_path, 'utf8') : '';
+                const patch = getPatch({
+                    filePath: file_path,
+                    fileContents: file,
+                    oldStr: old_string,
+                    newStr: new_string,
+                });
+                
+                return (
+                    <Box flexDirection="column">
+                        <Box 
+                            borderColor={theme.secondaryBorder}
+                            borderStyle="round"
+                            flexDirection="column"
+                            paddingX={1}
+                            marginY={1}
+                        >
+                            <Box paddingBottom={1}>
+                                <Text bold>{relative(getCwd(), file_path)}</Text>
+                            </Box>
+                            {intersperse(
+                                patch.map(p => (
+                                    <StructuredDiff
+                                        key={p.newStart}
+                                        patch={p}
+                                        dim={false}
+                                        width={columns - 12}
+                                    />
+                                )),
+                                i => (
+                                    <Text color={theme.secondaryText} key={`ellipsis-${i}`}>
+                                        ...
+                                    </Text>
+                                ),
+                            )}
+                        </Box>
+                    </Box>
+                );
+            }
+            case 'Replace': {
+                const { file_path, content } = request.toolInput;
+                const fileExists = existsSync(file_path);
+                
+                // If file exists, show diff
+                if (fileExists) {
+                    const oldContent = readFileSync(file_path, detectFileEncoding(file_path));
+                    const hunks = getPatch({
+                        filePath: file_path,
+                        fileContents: oldContent.toString(),
+                        oldStr: oldContent.toString(),
+                        newStr: content,
+                    });
+
+                    return (
+                        <Box flexDirection="column">
+                            <Box 
+                                borderColor={theme.secondaryBorder}
+                                borderStyle="round"
+                                flexDirection="column"
+                                paddingX={1}
+                                marginY={1}
+                            >
+                                <Box paddingBottom={1}>
+                                    <Text bold>{relative(getCwd(), file_path)}</Text>
+                                </Box>
+                                {intersperse(
+                                    hunks.map(p => (
+                                        <StructuredDiff
+                                            key={p.newStart}
+                                            patch={p}
+                                            dim={false}
+                                            width={columns - 12}
+                                        />
+                                    )),
+                                    i => (
+                                        <Text color={theme.secondaryText} key={`ellipsis-${i}`}>
+                                            ...
+                                        </Text>
+                                    ),
+                                )}
+                            </Box>
+                        </Box>
+                    );
+                } else {
+                    // If file doesn't exist, show new content
+                    return (
+                        <Box flexDirection="column">
+                            <Box 
+                                borderColor={theme.secondaryBorder}
+                                borderStyle="round"
+                                flexDirection="column"
+                                paddingX={1}
+                                marginY={1}
+                            >
+                                <Box paddingBottom={1}>
+                                    <Text bold>{relative(getCwd(), file_path)}</Text>
+                                </Box>
+                                <HighlightedCode
+                                    code={content || '(No content)'}
+                                    language={extname(file_path).slice(1)}
+                                />
+                            </Box>
+                        </Box>
+                    );
+                }
+            }
+            default:
+                if (request.toolInput && Object.keys(request.toolInput).length > 0) {
+                    // For other tools, show simplified input
+                    return (
+                        <Box marginTop={1} flexDirection="column">
+                            <Box
+                                borderColor={theme.secondaryBorder}
+                                borderStyle="round"
+                                flexDirection="column"
+                                paddingX={1}
+                                paddingY={1}
+                            >
+                                <HighlightedCode
+                                    code={JSON.stringify(request.toolInput, null, 2)}
+                                    language="json"
+                                />
+                            </Box>
+                        </Box>
+                    );
+                }
+                return null;
+        }
+    };
+
+    // Set title based on tool type
+    const getTitle = () => {
+        switch (request.toolName) {
+            case 'Bash':
+                return "Bash command";
+            case 'Edit':
+                return "Edit file";
+            case 'Replace':
+                const fileExists = existsSync(request.toolInput.file_path);
+                return fileExists ? "Edit file" : "Create file";
+            default:
+                return `Tool Request: ${request.toolName}`;
+        }
+    };
+
+    // Get prompt text based on tool type
+    const getPromptText = () => {
+        switch (request.toolName) {
+            case 'Edit':
+            case 'Replace': {
+                const { file_path } = request.toolInput;
+                const fileExists = existsSync(file_path);
+                return (
+                    <Text>
+                        Do you want to {fileExists ? 'make this edit to' : 'create'}{' '}
+                        <Text bold>{basename(file_path)}</Text>?
+                    </Text>
+                );
+            }
+            case 'Bash':
+                return <Text>Do you want to execute this command?</Text>;
+            default:
+                return <Text>Do you want to proceed?</Text>;
+        }
+    };
+
     return (
-        <Box borderStyle="round" padding={1} flexDirection="column">
-            <Text bold color="yellow">Tool Request:</Text>
-            <Text>The assistant wants to use the tool: {request.toolName}</Text>
-            <Newline />
-            <Text>Allow? (y/n)</Text>
-            {selection === 'allow' && <>{' '}<Text color="green">(Allowed)</Text></>}
-            {selection === 'deny' && <>{' '}<Text color="red">(Denied)</Text></>}
+        <Box 
+            borderStyle="round" 
+            padding={1} 
+            flexDirection="column"
+            borderColor={theme.permission}
+            marginTop={1}
+        >
+            <PermissionRequestTitle
+                title={getTitle()}
+                riskScore={null}
+            />
+            
+            {renderToolInput()}
+            
+            <Box flexDirection="column" marginTop={1}>
+                {getPromptText()}
+                <Box marginTop={1}>
+                    <Text>Allow? (y/n)</Text>
+                    {selection === 'allow' && <>{' '}<Text color="green">(Allowed)</Text></>}
+                    {selection === 'deny' && <>{' '}<Text color="red">(Denied)</Text></>}
+                </Box>
+            </Box>
         </Box>
     );
+}
+
+// Create a logger for this component
+const logger = createComponentLogger('REPL');
+
+// We need a helper function to format assistant responses in gray
+// Add this near where the logger is defined
+function logAssistantResponse(text: string, isDuplicate = false) {
+  if (process.stdout?.isTTY) {
+    const prefix = isDuplicate ? 
+      chalk.gray('[REPL] Skipping duplicate assistant response:') : 
+      chalk.gray('[REPL] Adding new assistant response:');
+    
+    // Format the preview text in gray, truncating if necessary
+    const preview = text.substring(0, 50) + (text.length > 50 ? '...' : '');
+    console.debug(chalk.gray(`${prefix} ${preview}`));
+  } else {
+    // In non-CLI mode, use the regular logger
+    logger.debug(`${isDuplicate ? 'Skipping duplicate' : 'Adding new'} assistant response: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`);
+  }
 }
 
 export function REPL({
@@ -210,14 +450,60 @@ export function REPL({
   // Define coreEngineRef at the top level
   const coreEngineRef = useRef<AsyncGenerator<CoreEvent, void, ToolResultBlockParam | undefined> | null>(null);
 
+  // Move the sessionManager initialization first
+  // --- Instantiate Session Manager --- 
+  // Use useMemo to instantiate only once, relies on getters/setters being set by the useEffect above
+  const sessionManager = useMemo(() => new CliSessionManager(), []);
+
+  // Initialize message getters/setters - update the getter whenever messages change
+  useEffect(() => {
+    setMessagesGetter(() => messages); // Provide the current state - will return the latest messages
+    setMessagesSetter(setMessages);   // Provide the state setter
+    
+    // Log for debugging
+    logger.debug(`Updated messages getter with ${messages.length} messages`);
+    if (messages.length > 0) {
+      logger.debug(`First message: ${messages[0].type} | Last message: ${messages[messages.length-1].type}`);
+    }
+  }, [messages]);  // Re-run when messages change to ensure getter returns latest state
+
+  // Add a separate effect to sync the session state, with a flag to prevent infinite loops
+  const [shouldSyncMessages, setShouldSyncMessages] = useState(false);
+
+  useEffect(() => {
+    if (shouldSyncMessages && messages.length > 0) {
+      // Reset flag first to prevent loops
+      setShouldSyncMessages(false);
+      
+      // Use a constant session ID since CLI only has one session
+      logger.debug(`Syncing messages with session manager ${messages.length}`);
+      sessionManager.setMessages('cli-session', messages)
+        .then(() => logger.debug(`Successfully synced messages with session manager ${messages.length}`))
+        .catch(err => logger.error(`Failed to sync messages with session manager:`, err));
+    }
+  }, [shouldSyncMessages, messages, sessionManager]);
+  
   // MCP State & related hooks... (ensure these are declared before use)
   // MCP State & related hooks... (ensure these are declared before use)
 
   // Instantiate the permission handler (Uses the original state setters)
-  const permissionHandler = useMemo(() => new CliPermissionHandler(setToolUseConfirm, (req) => {
-    console.log(`[REPL] Setting permission request:`, req?.tool ? req.tool.name : null);
-    setPermissionRequest(req);
-  }), [setToolUseConfirm, setPermissionRequest]);
+  const permissionHandler = useMemo(() => {
+    logger.debug(`Creating CliPermissionHandler with permission request state setter`);
+    return new CliPermissionHandler(
+      // For tool use confirmation
+      setToolUseConfirm, 
+      // For simple permission requests
+      (simplifiedRequest) => {
+        if (simplifiedRequest) {
+          // Use type assertion to avoid linter errors
+          logger.debug(`Setting permission request: ${(simplifiedRequest as any).toolName || "unnamed tool"}`);
+        } else {
+          logger.debug(`Clearing permission request`);
+        }
+        setPermissionRequest(simplifiedRequest);
+      }
+    );
+  }, [setToolUseConfirm, setPermissionRequest]);
 
   // Effect to fetch logo data
   useEffect(() => {
@@ -234,7 +520,7 @@ export function REPL({
           setIsDefaultModelState(isDefault);
         }
       } catch (error) {
-         console.error("Failed to fetch data for Logo:", error);
+         logger.error("Failed to fetch data for Logo:", error);
          // Optionally set an error state
       }
     };
@@ -284,8 +570,7 @@ export function REPL({
   }, [messages, showCostDialog, haveShownCostDialog])
 
   async function onInit() {
-    // reverify()
-
+    // Exit if no initial prompt
     if (!initialPrompt) {
       return
     }
@@ -294,397 +579,321 @@ export function REPL({
 
     const abortController = new AbortController()
     setAbortController(abortController)
-
-    const model = await getSlowAndCapableModel()
-    const newMessages = await processUserInput(
-      initialPrompt,
-      'prompt',
-      setToolJSX,
-      {
-        abortController,
-        options: {
-          // commands,
-          // forkNumber,
-          messageLogName,
-          tools,
-          // verbose,
-          slowAndCapableModel: model,
-          maxThinkingTokens: 0,
-        },
-        messageId: getLastAssistantMessageId(messages),
-        setForkConvoWithMessagesOnTheNextRender,
-        readFileTimestamps: readFileTimestamps.current,
-      },
-      null,
-    )
-
-    if (newMessages.length) {
-      for (const message of newMessages) {
-        if (message.type === 'user') {
-          addToHistory(initialPrompt)
-          // TODO: setHistoryIndex
+    
+    // Add to history
+    addToHistory(initialPrompt)
+    
+    try {
+      // Define a constant session ID for the CLI
+      const sessionId = 'cli-session';
+      
+      // Create user message from initial prompt
+      const userMessage = createUserMessage(initialPrompt);
+      
+      // Get current session state
+      const currentState = await sessionManager.getSessionState(sessionId);
+      logger.debug(`onInit: Session state has ${currentState.messages.length} messages`);
+      
+      // Add user message to session
+      await sessionManager.setMessages(sessionId, [...currentState.messages, userMessage]);
+      
+      // Update React state to show the user message
+      setMessages(messages => [...messages, userMessage]);
+      
+      // Call the ScriptaCore processInput function
+      logger.debug(`onInit: Initializing ScriptaCore with prompt: ${initialPrompt.substring(0, 30)}${initialPrompt.length > 30 ? '...' : ''}`);
+      coreEngineRef.current = processInput(
+        initialPrompt,
+        sessionId,
+        sessionManager
+      );
+      
+      // Process events from the core engine
+      let nextToolResult: ToolResultBlockParam | undefined = undefined;
+      while (true) {
+        if (!coreEngineRef.current) break; // Guard against null ref
+        
+        const { value: coreEvent, done } = await coreEngineRef.current.next(nextToolResult);
+        nextToolResult = undefined;
+        
+        if (done) {
+          logger.debug(`Core engine processing finished.`);
+          break;
+        }
+        
+        if (coreEvent) {
+          nextToolResult = await handleCoreEvent(coreEvent, abortController);
+        } else {
+          logger.debug(`Received undefined event from core generator.`);
         }
       }
-      setMessages(_ => [..._, ...newMessages])
-
-      // The last message is an assistant message if the user input was a bash command,
-      // or if the user input was an invalid slash command.
-      const lastMessage = newMessages[newMessages.length - 1]!
-      if (lastMessage.type === 'assistant') {
-        setAbortController(null)
-        setIsLoading(false)
-        return
-      }
-
-      // Commenting out the old query loop as it conflicts with the new processInput flow
-      /*
-        const [systemPrompt, context, model, maxThinkingTokens] =
-          await Promise.all([
-            getSystemPrompt(),
-            getContext(),
-            getSlowAndCapableModel(),
-            getMaxThinkingTokens([...messages, ...newMessages]),
-          ])
-
-        for await (const message of query(
-          [...messages, ...newMessages],
-          systemPrompt,
-          context,
-          permissionHandler, // This handler might not be the correct type for the old query fn
-          {
-            options: {
-              tools,
-              slowAndCapableModel: model,
-              dangerouslySkipPermissions,
-              maxThinkingTokens,
-            },
-            readFileTimestamps: readFileTimestamps.current,
-            abortController,
-          },
-        )) {
-          setMessages(oldMessages => [...oldMessages, message])
-        }
-      */
-    } else {
-      addToHistory(initialPrompt)
-      // TODO: setHistoryIndex
+    } catch (error) {
+      logger.error(`Error in onInit:`, error);
+      // Add error message to the chat
+      const errorMessage = createAssistantAPIErrorMessage(
+        `An error occurred while processing your input: ${error instanceof Error ? error.message : String(error)}`
+      );
+      setMessages(messages => [...messages, errorMessage]);
+    } finally {
+      setHaveShownCostDialog(
+        getGlobalConfig().hasAcknowledgedCostThreshold || false,
+      );
+      
+      setIsLoading(false);
+      setAbortController(null);
     }
-
-    setHaveShownCostDialog(
-      getGlobalConfig().hasAcknowledgedCostThreshold || false,
-    )
-
-    setIsLoading(false)
   }
 
   const handleCoreEvent = useCallback(async (coreEvent: CoreEvent, abortController: AbortController) => {
-         switch (coreEvent.type) {
-             case 'assistantResponse':
-                 conditionalLog("[REPL] Received assistantResponse:", coreEvent.text);
-                 const assistantMsg = createAssistantMessage(coreEvent.text);
-                 setMessages(oldMessages => [...oldMessages, assistantMsg]);
-                 return undefined; // No result to send back
+    switch (coreEvent.type) {
+      case 'assistantResponse':
+        logger.debug(`Received assistantResponse:`, coreEvent.text);
+        
+        // Check if this response is a duplicate of the last message
+        const lastMessage = messages[messages.length - 1];
+        const isDuplicate = lastMessage?.type === 'assistant' && 
+            lastMessage?.message?.content[0]?.type === 'text' && 
+            (lastMessage.message.content[0] as any).text === coreEvent.text;
+            
+        // Skip adding duplicate messages
+        if (isDuplicate) {
+          logAssistantResponse(coreEvent.text, true);
+          return undefined;
+        } else {
+          logAssistantResponse(coreEvent.text, false);
+        }
+        
+        // Create an assistant message from the text and add it to the messages state
+        const assistantMsg = createAssistantMessage(coreEvent.text);
+        setMessages(oldMessages => [...oldMessages, assistantMsg]);
+        // Trigger sync after messages are updated
+        setShouldSyncMessages(true);
+        // Return undefined immediately, don't process this event further
+        return undefined;
 
-             case 'error':
-                 console.error("[REPL] Received error:", coreEvent.message, coreEvent.error);
-                 const errorMsg = createAssistantAPIErrorMessage(coreEvent.message);
-                 setMessages(oldMessages => [...oldMessages, errorMsg]);
-                 return undefined; // No result to send back
+      case 'error':
+        logger.error(`Received error: ${coreEvent.message}`, coreEvent.error);
+        const errorMsg = createAssistantAPIErrorMessage(coreEvent.message);
+        setMessages(oldMessages => [...oldMessages, errorMsg]);
+        // Trigger sync after messages are updated
+        setShouldSyncMessages(true);
+        return undefined; // No result to send back
 
-             case 'toolRequest':
-                 console.log(`[REPL] Received toolRequest: ${coreEvent.toolName}`, {
-                    inputSize: typeof coreEvent.toolInput === 'string' ? 
-                      `${Math.min(coreEvent.toolInput.length, 30)} chars` + 
-                      (coreEvent.toolInput.length > 30 ? '...' : '') :
-                      'object',
-                    toolUseId: coreEvent.toolUseId // Log the tool use ID for tracing
-                 });
+      case 'toolRequest':
+        logger.debug(`Received toolRequest: ${coreEvent.toolName}`, {
+          inputSize: typeof coreEvent.toolInput === 'string' ? 
+            `${Math.min(coreEvent.toolInput.length, 30)} chars` + 
+            (coreEvent.toolInput.length > 30 ? '...' : '') :
+            'object',
+          toolUseId: coreEvent.toolUseId // Log the tool use ID for tracing
+        });
 
-                 // --- Actual Tool Execution Logic ---
-                 let toolResult: ToolResultBlockParam | undefined = undefined;
-                 const toolToUse = tools.find(t => t.name === coreEvent.toolName);
+        // --- Actual Tool Execution Logic ---
+        let toolResult: ToolResultBlockParam | undefined = undefined;
+        const toolToUse = tools.find(t => t.name === coreEvent.toolName);
 
-                 if (!toolToUse) {
-                     // Construct result object directly
-                     toolResult = {
-                         type: 'tool_result',
-                         tool_use_id: coreEvent.toolUseId,
-                         content: `Error: Tool '${coreEvent.toolName}' not found. Available tools: ${tools.map(t => t.name).join(', ')}`,
-                         is_error: true,
-                     };
-                 } else {
-                     try {
-                         // Clone the abort controller to prevent accidental aborts
-                         const permissionContext: PermissionHandlerContext = { 
-                            abortController: new AbortController(), 
-                            options: { 
-                                dangerouslySkipPermissions: dangerouslySkipPermissions ?? false
-                            }
-                         };
-                         
-                         // Add event listener to propagate aborts from main controller to permission context
-                         abortController.signal.addEventListener('abort', () => {
-                            permissionContext.abortController.abort('Main flow aborted');
-                         });
-                         let granted = false;
+        if (!toolToUse) {
+          // Construct result object directly
+          toolResult = {
+            type: 'tool_result',
+            tool_use_id: coreEvent.toolUseId,
+            content: `Error: Tool '${coreEvent.toolName}' not found. Available tools: ${tools.map(t => t.name).join(', ')}`,
+            is_error: true,
+          };
+        } else {
+          try {
+            // Create the context required by the permission handler methods
+            const permissionContext: PermissionHandlerContext = {
+              abortController: abortController, // Use the controller for this query
+              options: {
+                dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
+              }
+            };
+            
+            // Add event listener to propagate aborts from main controller to permission context
+            abortController.signal.addEventListener('abort', () => {
+              permissionContext.abortController.abort('Main flow aborted');
+            });
+            
+            // 1. Check for existing permission first
+            logger.debug(`Checking permission for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
+            let granted = await permissionHandler.checkPermission(toolToUse, coreEvent.toolInput, permissionContext);
 
-                         // 1. Check for existing permission first
-                         console.log(`[REPL] Checking permission for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
-                         granted = await permissionHandler.checkPermission(toolToUse, coreEvent.toolInput, permissionContext);
+            // 2. If not granted, request it
+            if (!granted) {
+              logger.debug(`No existing permission found. Requesting via handler for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
+              const lastAssistantMessage = messages.slice().reverse().find(m => m.type === 'assistant') as AssistantMessage | undefined;
+              
+              granted = await permissionHandler.requestPermission(
+                toolToUse,
+                coreEvent.toolInput,
+                permissionContext,
+                lastAssistantMessage
+              );
+            }
 
-                         // 2. If not granted, request it
-                         if (!granted) {
-                             console.log(`[REPL] No existing permission found. Requesting via handler for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
-                             // TODO: We need the assistantMessage that triggered this tool request
-                             //       to pass to the requestPermission method.
-                             //       For now, we might need a placeholder or to adjust the handler interface.
-                             //       Let's assume we can get it from the message history for now (requires finding it).
-                             const lastAssistantMessage = messages.slice().reverse().find(m => m.type === 'assistant') as AssistantMessage | undefined;
-                             // We'll let the PermissionHandler handle null values now, so no need to throw an error
-                             
-                             granted = await permissionHandler.requestPermission(
-                                 toolToUse,
-                                 coreEvent.toolInput,
-                                 permissionContext,
-                                 lastAssistantMessage // Pass the found message, which might be undefined
-                             );
-                         }
+            if (granted) {
+              logger.debug(`Permission granted. Calling tool: ${coreEvent.toolName}`);
+              
+              // Add feedback message to UI confirming permission was granted
+              const permissionGrantedMsg = {
+                type: 'assistant',
+                message: {
+                  id: `permission-granted-${Date.now()}`,
+                  role: 'assistant',
+                  content: [{ 
+                    type: 'text', 
+                    text: `Permission granted for ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
+                  }]
+                },
+                isSuccessMessage: true,
+                durationMs: 0,
+                costUSD: 0
+              };
+              setMessages(oldMessages => [...oldMessages, permissionGrantedMsg]);
+              
+              const output = await toolToUse.call(
+                coreEvent.toolInput,
+                { 
+                  abortController,
+                  options: {
+                    dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
+                    forkNumber,
+                    messageLogName,
+                    verbose: false
+                  },
+                  readFileTimestamps: {}
+                }
+              );
+              logger.debug(`Tool ${coreEvent.toolName} finished. Raw Output Type:`, typeof output);
 
-                         if (granted) {
-                             conditionalLog(`[REPL] Permission granted. Calling tool: ${coreEvent.toolName}`);
-                             
-                             // Add feedback message to UI confirming permission was granted
-                             const permissionGrantedMsg = {
-                                 type: 'assistant',
-                                 message: {
-                                     id: `permission-granted-${Date.now()}`,
-                                     role: 'assistant',
-                                     content: [{ 
-                                         type: 'text', 
-                                         text: `Permission granted for ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
-                                     }]
-                                 },
-                                 // Ensure the dot shows by setting metadata needed for dot display
-                                 isSuccessMessage: true,
-                                 durationMs: 0,
-                                 costUSD: 0
-                             };
-                             setMessages(oldMessages => [...oldMessages, permissionGrantedMsg]);
-                             
-                             const output = await toolToUse.call(
-                                coreEvent.toolInput,
-                                { 
-                                   abortController,
-                                   options: {
-                                     dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
-                                     forkNumber,
-                                     messageLogName,
-                                     verbose: false
-                                   },
-                                   readFileTimestamps: {}
-                                }
-                             );
-                             conditionalLog(`[REPL] Tool ${coreEvent.toolName} finished. Raw Output Type:`, typeof output);
+              // Handle generator output
+              if (typeof output === 'object' && output !== null && typeof output[Symbol.asyncIterator] === 'function') {
+                let finalResult = null;
+                let resultForAssistant = null;
+                
+                for await (const value of output) {
+                  if (value.type === 'result') {
+                    finalResult = value.data;
+                    resultForAssistant = value.resultForAssistant;
+                  }
+                }
+                
+                if (finalResult) {
+                  // Create user message with tool result
+                  const toolMessage = {
+                    type: 'user',
+                    message: {
+                      id: `tool-result-${Date.now()}`,
+                      role: 'user',
+                      content: [
+                        {
+                          type: 'tool_result',
+                          tool_use_id: coreEvent.toolUseId,
+                          content: JSON.stringify(finalResult, null, 2)
+                        }
+                      ]
+                    },
+                    toolUseResult: {
+                      data: finalResult,
+                      tool_use_id: coreEvent.toolUseId
+                    }
+                  };
+                  setMessages(oldMessages => [...oldMessages, toolMessage]);
+                  
+                  // Format for LLM
+                  toolResult = {
+                    type: 'tool_result',
+                    tool_use_id: coreEvent.toolUseId,
+                    content: resultForAssistant || JSON.stringify(finalResult, null, 2),
+                    is_error: false
+                  };
+                }
+              } else {
+                // Handle non-generator response (string or other)
+                const resultStr = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
+                
+                toolResult = {
+                  type: 'tool_result',
+                  tool_use_id: coreEvent.toolUseId,
+                  content: resultStr,
+                  is_error: false
+                };
+              }
 
-                             // Format the result - Handle AsyncGenerator specifically
-                             let resultContent: string;
-                             let toolResultObject: any = null; // For preserving object structure
-                             
-                             const isAsyncGenerator = (val: any): val is AsyncGenerator => {
-                                return typeof val === 'object' && val !== null && typeof val[Symbol.asyncIterator] === 'function';
-                             };
+            } else {
+              logger.debug(`Permission denied for tool: ${coreEvent.toolName}`);
+              
+              // Add feedback message for denying permission with an error dot
+              const permissionDeniedMsg = {
+                type: 'assistant',
+                message: {
+                  id: `permission-denied-${Date.now()}`,
+                  role: 'assistant',
+                  content: [{ 
+                    type: 'text', 
+                    text: `User rejected ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
+                  }]
+                },
+                isErrorMessage: true,
+                durationMs: 0,
+                costUSD: 0
+              };
+              setMessages(oldMessages => [...oldMessages, permissionDeniedMsg]);
+              
+              // Construct result object directly
+              toolResult = {
+                type: 'tool_result',
+                tool_use_id: coreEvent.toolUseId,
+                content: `Permission denied by user for tool: ${coreEvent.toolName}`,
+                is_error: true
+              };
+            }
+          } catch (error: any) {
+            logger.error(`Error executing tool ${coreEvent.toolName}:`, error);
+            let errorMessage = `Error executing tool: ${coreEvent.toolName}.`;
+            if (error instanceof Error) {
+              errorMessage += ` ${error.message}`;
+            }
+            // Construct result object directly
+            toolResult = {
+              type: 'tool_result',
+              tool_use_id: coreEvent.toolUseId,
+              content: errorMessage,
+              is_error: true
+            };
+          }
+        }
 
-                             if (isAsyncGenerator(output)) {
-                                // Just log that we're processing an AsyncGenerator without details
-                                conditionalLog(`[REPL] Processing AsyncGenerator output for ${coreEvent.toolName}...`);
-                                let accumulatedContent = "";
-                                let resultObjects: any[] = [];
-                                
-                                try {
-                                    for await (const value of output) {
-                                        // Store original objects for LLM
-                                        if (typeof value === 'object' && value !== null) {
-                                            resultObjects.push(value);
-                                        }
-                                        
-                                        // Format for display
-                                        if (typeof value === 'object' && value !== null) {
-                                            try {
-                                                // For final results with type and data
-                                                if (value.type === 'result' && value.data) {
-                                                    const formattedResult = JSON.stringify(value.data, null, 2);
-                                                    accumulatedContent += formattedResult;
-                                                } else {
-                                                    // Generic object serialization
-                                                    accumulatedContent += JSON.stringify(value, null, 2);
-                                                }
-                                            } catch (e) {
-                                                console.error(`[REPL] Error serializing tool output:`, e);
-                                                accumulatedContent += `[Complex Object]`;
-                                            }
-                                        } else {
-                                            // Append string values as before
-                                            accumulatedContent += String(value);
-                                        }
-                                    }
-                                    
-                                    resultContent = accumulatedContent;
-                                    
-                                    // If we collected objects, use the last one (or all combined for some tools)
-                                    if (resultObjects.length > 0) {
-                                        if (resultObjects.length === 1) {
-                                            toolResultObject = resultObjects[0];
-                                        } else {
-                                            // For tools that yield multiple objects, use the last with 'result' type if available
-                                            const resultObj = resultObjects.find(obj => obj.type === 'result');
-                                            if (resultObj) {
-                                                toolResultObject = resultObj;
-                                            } else {
-                                                // Otherwise use the last object
-                                                toolResultObject = resultObjects[resultObjects.length - 1];
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Use proper tool rendering instead of plain text
-                                    // Create a user tool result message that will render properly
-                                    const toolData = toolResultObject?.data || toolResultObject || { content: resultContent };
-                                    
-                                    // Create a message structure that will be properly rendered by the Message component
-                                    const toolOutputMessage = {
-                                        type: 'user',
-                                        message: {
-                                            id: `tool-output-${coreEvent.toolUseId}`,
-                                            role: 'user',
-                                            content: [
-                                                {
-                                                    type: 'tool_result',
-                                                    tool_use_id: coreEvent.toolUseId,
-                                                    content: resultContent
-                                                }
-                                            ]
-                                        },
-                                        // Add toolUseResult for UserToolSuccessMessage component
-                                        toolUseResult: {
-                                            data: toolData,
-                                            tool_use_id: coreEvent.toolUseId
-                                        }
-                                    };
-                                    
-                                    // Debug log what's being rendered - but truncate long content
-                                    conditionalLog(`[REPL] Tool output message for ${coreEvent.toolName}:`, {
-                                        type: toolOutputMessage.type,
-                                        id: toolOutputMessage.message.id,
-                                        contentType: toolOutputMessage.message.content[0]?.type,
-                                        // Only log brief info about content, not the full content
-                                        contentSize: typeof resultContent === 'string' ? 
-                                            `${resultContent.length} chars` : 'object'
-                                    });
-                                    
-                                    // Add the properly structured message to be rendered
-                                    setMessages(oldMessages => [...oldMessages, toolOutputMessage]);
-                                    
-                                    // Log brief summary instead of full content
-                                    conditionalLog(`[REPL] Tool ${coreEvent.toolName} result summary:`, {
-                                        size: typeof resultContent === 'string' ? resultContent.length : 'object',
-                                        objectType: toolResultObject ? typeof toolResultObject : 'none'
-                                    });
-                                } catch (genError) {
-                                     console.error(`[REPL] Error consuming generator for ${coreEvent.toolName}:`, genError);
-                                     resultContent = `[Error consuming tool generator: ${genError instanceof Error ? genError.message : String(genError)}]`;
-                                }
-                             } else if (typeof output === 'string') {
-                                 resultContent = output;
-                             } else if (typeof output === 'object' && output !== null) {
-                                 try {
-                                     resultContent = JSON.stringify(output, null, 2);
-                                     toolResultObject = output; // Save the original object
-                                 } catch (e) {
-                                     console.error(`[REPL] Error stringifying tool output for ${coreEvent.toolName}:`, e);
-                                     resultContent = `[Error: Could not serialize tool output]`;
-                                 }
-                             } else {
-                                 resultContent = String(output);
-                             }
+        logger.debug(`Sending result for ${coreEvent.toolUseId}:`, {
+          type: toolResult?.type,
+          tool_use_id: toolResult?.tool_use_id,
+          is_error: toolResult?.is_error,
+          contentSize: typeof toolResult?.content === 'string' ? 
+            `${Math.min(toolResult.content.length, 50)} chars` + 
+            (toolResult.content.length > 50 ? '...' : '') : 'object'
+        });
+        return toolResult;
 
-                             // Use resultForAssistant if available
-                             const finalContent = toolResultObject?.resultForAssistant || resultContent;
-                             
-                             toolResult = {
-                                type: 'tool_result',
-                                tool_use_id: coreEvent.toolUseId,
-                                content: finalContent,
-                                is_error: false
-                             };
-
-                         } else {
-                             conditionalLog(`[REPL] Permission denied for tool: ${coreEvent.toolName}`);
-                             
-                             // Add feedback message for denying permission with an error dot
-                             const permissionDeniedMsg = {
-                                 type: 'assistant',
-                                 message: {
-                                     id: `permission-denied-${Date.now()}`,
-                                     role: 'assistant',
-                                     content: [{ 
-                                         type: 'text', 
-                                         text: `User rejected ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
-                                     }]
-                                 },
-                                 // Ensure the red error dot shows
-                                 isErrorMessage: true,
-                                 durationMs: 0,
-                                 costUSD: 0
-                             };
-                             setMessages(oldMessages => [...oldMessages, permissionDeniedMsg]);
-                             
-                             // Construct result object directly
-                             toolResult = {
-                                 type: 'tool_result',
-                                 tool_use_id: coreEvent.toolUseId,
-                                 content: `Permission denied by user for tool: ${coreEvent.toolName}`,
-                                 is_error: true
-                             };
-                         }
-                     } catch (error: any) {
-                         console.error(`[REPL] Error executing tool ${coreEvent.toolName}:`, error);
-                         let errorMessage = `Error executing tool: ${coreEvent.toolName}.`;
-                         if (error instanceof Error) {
-                            errorMessage += ` ${error.message}`;
-                         }
-                         // TODO: Potentially extract more specific error info
-                         // Construct result object directly
-                         toolResult = {
-                             type: 'tool_result',
-                             tool_use_id: coreEvent.toolUseId,
-                             content: errorMessage, // Use the determined errorMessage
-                             is_error: true
-                         };
-                     }
-                 }
-                 // --- End Actual Tool Execution Logic ---
-
-                 conditionalLog(`[REPL] Sending result for ${coreEvent.toolUseId}:`, {
-                    type: toolResult?.type,
-                    tool_use_id: toolResult?.tool_use_id,
-                    is_error: toolResult?.is_error,
-                    contentSize: typeof toolResult?.content === 'string' ? 
-                        `${Math.min(toolResult.content.length, 50)} chars` + 
-                        (toolResult.content.length > 50 ? '...' : '') : 'object'
-                 });
-                 return toolResult; // Send the actual result (or error) back
-
-             default:
-                 conditionalLog("[REPL] Received unknown CoreEvent type:", (coreEvent as any)?.type);
-                 return undefined;
-         }
-     }, [tools, permissionHandler, dangerouslySkipPermissions, setMessages]); // Added dependencies
+      default:
+        logger.debug(`Received unknown CoreEvent type:`, (coreEvent as any)?.type);
+        return undefined;
+    }
+  }, [tools, permissionHandler, dangerouslySkipPermissions, forkNumber, messageLogName, messages, setMessages, conditionalLog, sessionManager]);
 
   async function onQuery(
     newMessages: MessageType[],
     abortController: AbortController,
   ) {
-    setMessages(oldMessages => [...oldMessages, ...newMessages])
+    // Update messages state with new messages
+    setMessages(oldMessages => [...oldMessages, ...newMessages]);
+    
+    // Trigger sync after messages are updated
+    setShouldSyncMessages(true);
+    
+    // Add a small delay to ensure React state has propagated
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
     markProjectOnboardingComplete()
     
     const lastMessage = newMessages[newMessages.length - 1]!
@@ -702,7 +911,7 @@ export function REPL({
     }
     if (userInput === "") {
         // Handle cases where the input wasn't a user text message (e.g. tool result, progress)
-        console.warn("[REPL] onQuery called without user text input.");
+        logger.warn(`onQuery called without user text input.`);
         setIsLoading(false);
         setAbortController(null);
         return;
@@ -711,20 +920,50 @@ export function REPL({
     setIsLoading(true);
 
     try {
-      const currentSessionState: SessionState = {
-        messages: [...messages, ...newMessages], // Pass current messages
-        currentWorkingDirectory: getOriginalCwd(), // Get current CWD
-        tools: tools, // Pass tools from props
-        config: {
-           dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
-           // maxThinkingTokens: await getMaxThinkingTokens(...), // TODO: Get max tokens if needed by core
-           // slowAndCapableModel: await getSlowAndCapableModel(), // TODO: Get model if needed by core
-           // primaryProvider: getGlobalConfig().primaryProvider, // TODO: Get provider if needed
-        }
-      };
+      // Define a constant session ID for the CLI
+      const sessionId = 'cli-session';
+      
+      // Add additional logging to debug message state
+      logger.debug(`Current React state messages count: ${messages.length}`);
+      
+      // Verify session state before starting
+      const sessionState = await sessionManager.getSessionState(sessionId);
+      logger.debug(`Starting core engine with ${sessionState.messages.length} messages in session state`);
+      
+      // Print a few messages from the session state to verify content
+      if (sessionState.messages.length > 0) {
+        const lastStateMsg = sessionState.messages[sessionState.messages.length - 1];
+        const firstStateMsg = sessionState.messages[0];
+        logger.debug(`First session message: ${firstStateMsg.type}, Last session message: ${lastStateMsg.type}`);
+      }
+      
+      // Check for duplicate user messages to avoid adding them again
+      const isDuplicateUserMessage = lastMessage.type === 'user' && 
+        sessionState.messages.some(m => 
+          m.type === 'user' && 
+          typeof m.message.content === 'string' &&
+          typeof lastMessage.message.content === 'string' &&
+          m.message.content === lastMessage.message.content
+        );
 
-      // Call processInput WITHOUT abortController argument
-      coreEngineRef.current = processInput(userInput, currentSessionState);
+      if (!isDuplicateUserMessage) {
+        // Only add the latest user message to the session to avoid duplicates
+        logger.debug('Adding new user message to session');
+        await sessionManager.setMessages(sessionId, [...sessionState.messages, lastMessage]);
+        
+        // Double-check that message was added
+        const updatedState = await sessionManager.getSessionState(sessionId);
+        logger.debug(`After adding message: session has ${updatedState.messages.length} messages`);
+      } else {
+        logger.debug('Skipping duplicate user message');
+      }
+
+      // Call processInput with sessionId and sessionManager
+      coreEngineRef.current = processInput(
+          userInput,
+          sessionId,
+          sessionManager
+      );
 
       let nextToolResult: ToolResultBlockParam | undefined = undefined;
       while (true) {
@@ -733,19 +972,19 @@ export function REPL({
           nextToolResult = undefined;
 
           if (done) {
-              conditionalLog("[REPL] Core engine processing finished.");
+              logger.debug(`Core engine processing finished.`);
               break;
           }
 
           if (coreEvent) {
               nextToolResult = await handleCoreEvent(coreEvent, abortController);
           } else {
-               conditionalLog("[REPL] Received undefined event from core generator.");
+               logger.debug(`Received undefined event from core generator.`);
           }
       }
 
     } catch (error) {
-        console.error("[REPL] Unhandled error during core processing:", error);
+        logger.error(`Unhandled error during core processing:`, error);
         const errorMsg = createAssistantAPIErrorMessage("An unexpected error occurred.");
         setMessages(oldMessages => [...oldMessages, errorMsg]);
     } finally {
@@ -757,13 +996,6 @@ export function REPL({
 
   // Register cost summary tracker
   useCostSummary()
-
-  // Register messages getter and setter
-  // useEffect(() => {
-  //   const getMessages = () => messages
-  //   setMessagesGetter(getMessages)
-  //   setMessagesSetter(setMessages)
-  // }, [messages])
 
   // Record transcripts locally, for debugging and conversation recovery
   useLogMessages(messages, messageLogName, forkNumber)
@@ -936,7 +1168,7 @@ export function REPL({
       <Static items={staticMessagesJSX}>
           {(jsxItem, index) => <Box key={index}>{jsxItem}</Box>}
       </Static>
-      {/* Map over transient messages */} 
+      {/* Only render transient messages, not all messages */}
       {transientMessagesJSX.map((jsx, index) => <Box key={(jsx as any)?.key ?? index}>{jsx}</Box>)}
       
       <Box
@@ -952,16 +1184,6 @@ export function REPL({
         {toolJSX ? toolJSX.jsx : null}
         {!toolJSX &&
           toolUseConfirm &&
-          !isMessageSelectorVisible &&
-          !binaryFeedbackContext && (
-            <PermissionRequest
-              toolUseConfirm={toolUseConfirm}
-              onDone={() => setToolUseConfirm(null)}
-              verbose={verbose ?? false}
-            />
-          )}
-        {!toolJSX &&
-          !toolUseConfirm &&
           !isMessageSelectorVisible &&
           !binaryFeedbackContext &&
           showingCostDialog && (
@@ -981,7 +1203,10 @@ export function REPL({
 
         {/* Conditionally render PermissionPrompt */} 
         {permissionRequest && (
-            <PermissionPrompt request={permissionRequest} />
+            <>
+              {console.debug("[REPL] Rendering permission request for:", permissionRequest.toolName)}
+              <PermissionPrompt request={permissionRequest} />
+            </>
         )}
 
         {/* Conditionally render PromptInput, disabling if permissionRequest is active */}

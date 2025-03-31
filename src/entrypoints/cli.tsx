@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --no-warnings=ExperimentalWarning --enable-source-maps
-import { initSentry } from '../services/sentry'
+// import { initSentry } from '../services/sentry'
 import { PRODUCT_COMMAND, PRODUCT_NAME } from '../constants/product'
-initSentry() // Initialize Sentry as early as possible
+// initSentry() // Initialize Sentry as early as possible
 
 // XXX: Without this line (and the Object.keys, even though it seems like it does nothing!),
 // there is a bug in Bun only on Win32 that causes this import to be removed, even though
@@ -80,24 +80,24 @@ import { showInvalidConfigDialog } from '../components/InvalidConfigDialog'
 import { ConfigParseError } from '../utils/errors'
 import { grantReadPermissionForOriginalDir } from '../utils/permissions/filesystem'
 import { MACRO } from '../constants/macros'
-import meow from 'meow'
-import * as readline from 'readline'
-import figures from 'figures'
-import { createHash } from 'crypto'
-import chalk from 'chalk'
-import { ExitError } from '../screens/REPL'
-import { setUpProjectConfigIfNeeded } from '../utils/project-onboarding'
-import { CommandType } from './commands'
-import type { Question } from '../components/Question'
-import {
-  grantReadPermissionForPath,
-} from '../utils/permissions'
-import { findMcprcServersThatNeedApproval } from '../utils/mcprc'
-import { McprcApprovalDialog } from '../screens/McprcApprovalDialog'
-import { version } from '../../package.json'
-import { ClaudeDesktopDialog } from '../screens/ClaudeDesktopDialog'
-import os from 'os'
-import { showError } from '../utils/error-handling'
+// import meow from 'meow'
+// import * as readline from 'readline'
+// import figures from 'figures'
+// import { createHash } from 'crypto'
+// import chalk from 'chalk'
+// import { ExitError } from '../screens/REPL'
+// import { setUpProjectConfigIfNeeded } from '../utils/project-onboarding'
+// import { CommandType } from './commands'
+// import type { Question } from '../components/Question'
+// import {
+//   grantReadPermissionForPath,
+// } from '../utils/permissions'
+// import { findMcprcServersThatNeedApproval } from '../utils/mcprc'
+// import { McprcApprovalDialog } from '../screens/McprcApprovalDialog'
+// import { version } from '../../package.json'
+// import { ClaudeDesktopDialog } from '../screens/ClaudeDesktopDialog'
+// import os from 'os'
+// import { showError } from '../utils/error-handling'
 
 export function completeOnboarding(): void {
   const config = getGlobalConfig()

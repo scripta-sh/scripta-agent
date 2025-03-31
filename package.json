@@ -24,7 +24,7 @@
     "yoga.wasm"
   ],
   "scripts": {
-    "dev": "tsx ./src/entrypoints/cli.tsx --verbose",
+    "dev": "tsx ./src/entrypoints/cli.tsx",
     "api:start": "NODE_ENV=development tsx ./src/entrypoints/api.ts",
     "api:test": "./scripts/test-api.sh",
     "build": "bun build src/entrypoints/cli.tsx --minify --outfile cli.mjs --target=node",

@@ -18,6 +18,10 @@ import { FileEditTool } from '../../tools/FileEditTool/FileEditTool'; // Fixed f
 import { FileWriteTool } from '../../tools/FileWriteTool/FileWriteTool'; // Fixed from @/ to relative path
 import { NotebookEditTool } from '../../tools/NotebookEditTool/NotebookEditTool'; // Fixed from @/ to relative path
 import { randomUUID } from 'crypto';
+import { createComponentLogger } from '../../utils/log';
+
+// Create a logger instance
+const logger = createComponentLogger('CliPermissionHandler');
 
 type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
 
@@ -66,6 +70,11 @@ export class CliPermissionHandler implements IPermissionHandler {
   
   // Check if session-wide permission has been granted for this specific tool invocation
   private hasSessionPermission(tool: Tool, input: any): boolean {
+    // For file operations, we always want to require permission, so return false
+    if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
+      return false;
+    }
+    
     // Get all granted paths for this tool
     const toolGranted = this.sessionGrantedTools.get(tool.name);
     if (!toolGranted) return false;
@@ -93,20 +102,20 @@ export class CliPermissionHandler implements IPermissionHandler {
     input: any,
     context: PermissionHandlerContext
   ): Promise<boolean> {
-    console.log(`[CliPermissionHandler] Checking permission for ${tool.name}`);
+    logger.debug(`Checking permission for ${tool.name}`);
     // 1. Always allow if dangerouslySkipPermissions is set
     if (context.options.dangerouslySkipPermissions) {
-      console.log(`[CliPermissionHandler] Skipping check due to dangerouslySkipPermissions`);
+      logger.debug(`Skipping check due to dangerouslySkipPermissions`);
       return true;
     }
     
     // Check if this specific invocation has session-wide permission
     if (this.hasSessionPermission(tool, input)) {
-      console.log(`[CliPermissionHandler] Found session permission for ${tool.name}`);
+      logger.debug(`Found session permission for ${tool.name}`);
       
       // Make sure filesystem-level permission is also granted for file tools
       if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
-        console.log(`[CliPermissionHandler] Granting filesystem permission for ${tool.name}`);
+        logger.debug(`Granting filesystem permission for ${tool.name}`);
         // Use the savePermission that's already imported at the top
         savePermission(tool, input, null);
       }
@@ -118,11 +127,11 @@ export class CliPermissionHandler implements IPermissionHandler {
     const permissionCheckResult = await hasPermissionsToUseTool(tool, input, context, null);
     
     if (permissionCheckResult.result) {
-      console.log(`[CliPermissionHandler] Found existing permission for ${tool.name} via hasPermissionsToUseTool`);
+      logger.debug(`Found existing permission for ${tool.name} via hasPermissionsToUseTool`);
       return true;
     }
 
-    console.log(`[CliPermissionHandler] No pre-existing permission found for ${tool.name}`);
+    logger.debug(`No pre-existing permission found for ${tool.name}`);
     return false;
   }
 
@@ -132,7 +141,7 @@ export class CliPermissionHandler implements IPermissionHandler {
     context: PermissionHandlerContext,
     assistantMessage?: AssistantMessage
   ): Promise<boolean> {
-    console.log(`[CliPermissionHandler] Requesting permission for ${tool.name}`);
+    logger.debug(`Requesting permission for ${tool.name}`);
     // Create a placeholder assistant message if one isn't provided
     const placeholderAssistantMessage: AssistantMessage = assistantMessage || {
       type: 'assistant',
@@ -170,6 +179,34 @@ export class CliPermissionHandler implements IPermissionHandler {
         // commandPrefix logic might need adjustment or removal if not used
         const commandPrefix = null; 
 
+        // Set the simplified permission request for the CLI UI
+        const userFacingName = tool.userFacingName ? tool.userFacingName(input) : tool.name;
+        logger.debug(`Setting permission request for ${userFacingName}`);
+        this.setPermissionRequest({
+          toolName: userFacingName,
+          toolInput: input,
+          onAllow: () => {
+            // Clean up UI state
+            logger.debug(`Permission request allowed by user`);
+            this.setPermissionRequest(null);
+            // Proceed with the allow flow
+            this.setToolUseConfirm(null);
+            // Save to the session cache as a one-time permission
+            if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
+              logger.debug(`Granting filesystem permission for current request: ${tool.name}`);
+              savePermission(tool, input, null);
+            }
+            resolve(true);
+          },
+          onDeny: () => {
+            // Clean up UI state
+            logger.debug(`Permission request denied by user`);
+            this.setPermissionRequest(null);
+            this.setToolUseConfirm(null);
+            handleAbort();
+          }
+        });
+
         this.setToolUseConfirm({
           assistantMessage: placeholderAssistantMessage,
           tool,
@@ -179,20 +216,22 @@ export class CliPermissionHandler implements IPermissionHandler {
           riskScore: null,
           onAbort: () => {
             this.setToolUseConfirm(null);
+            this.setPermissionRequest(null); // Also clean up permission request
             handleAbort();
           },
           onAllow: async (type: 'once' | 'permanent') => {
             this.setToolUseConfirm(null);
+            this.setPermissionRequest(null); // Also clean up permission request
             
             // Save to the session cache only if user chose "don't ask again this session"
             if (type === 'permanent') {
-              console.log(`[CliPermissionHandler] Granting session-wide permission for ${tool.name}`);
+              logger.debug(`Granting session-wide permission for ${tool.name}`);
               this.grantSessionPermission(tool, input);
             }
             
             // Always save filesystem permission for the current request
             if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
-              console.log(`[CliPermissionHandler] Granting filesystem permission for current request: ${tool.name}`);
+              logger.debug(`Granting filesystem permission for current request: ${tool.name}`);
               savePermission(tool, input, null);
             }
             
@@ -200,11 +239,13 @@ export class CliPermissionHandler implements IPermissionHandler {
           },
           onReject: () => {
             this.setToolUseConfirm(null);
+            this.setPermissionRequest(null); // Also clean up permission request
             handleAbort(); // Aborting is handled within handleAbort now
           },
         });
       } catch (error) {
-        console.error("Error during permission request setup:", error);
+        logger.error("Error during permission request setup:", error);
+        this.setPermissionRequest(null); // Clean up on error
         handleAbort(); // Treat errors as denials/aborts
       }
     });

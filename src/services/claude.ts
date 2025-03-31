@@ -11,7 +11,7 @@ import { addToTotalCost } from '../cost-tracker'
 import type { AssistantMessage, UserMessage } from '../query'
 import { Tool } from '../Tool'
 import { getAnthropicApiKey, getOrCreateUserID, getGlobalConfig, getActiveApiKey, markApiKeyAsFailed } from '../utils/config'
-import { logError, SESSION_ID } from '../utils/log'
+import { logError, SESSION_ID, createComponentLogger } from '../utils/log'
 import { USER_AGENT } from '../utils/http'
 import {
   createAssistantAPIErrorMessage,
@@ -37,6 +37,21 @@ import { nanoid } from 'nanoid'
 import { getCompletion } from './openai'
 import { getReasoningEffort } from 'utils/thinking'
 
+// Create a logger for this component
+const logger = createComponentLogger('Claude');
+
+// Helper function for API call logging that ensures entire message is gray
+function logApiCall(provider: string, model: string, endpoint: string) {
+  if (process.stdout?.isTTY) {
+    // In CLI mode, format the entire message in gray including the emoji
+    console.debug(
+      chalk.gray(`[Claude] 🔄 API Call: ${provider} | Model: ${model} | Endpoint: ${endpoint}`)
+    );
+  } else {
+    // In non-CLI mode, use the standard logger
+    logger.debug(`🔄 API Call: ${provider} | Model: ${model} | Endpoint: ${endpoint}`);
+  }
+}
 
 interface StreamResponse extends APIMessage {
   ttftMs?: number
@@ -147,9 +162,7 @@ async function withRetry<T>(
       const retryAfter = error.headers?.['retry-after'] ?? null
       const delayMs = getRetryDelay(attempt, retryAfter)
 
-      console.log(
-        `  ⎿  ${chalk.red(`API ${error.name} (${error.message}) · Retrying in ${Math.round(delayMs / 1000)} seconds… (attempt ${attempt}/${maxRetries})`)}`,
-      )
+      logger.warn(`API ${error.name} (${error.message}) · Retrying in ${Math.round(delayMs / 1000)} seconds… (attempt ${attempt}/${maxRetries})`);
 
       logEvent('tengu_api_retry', {
         attempt: String(attempt),
@@ -385,7 +398,7 @@ function convertOpenAIResponseToAnthropic(response: OpenAI.ChatCompletion) {
       try {
         toolArgs = JSON.parse(tool.arguments)
       } catch (e) {
-        // console.log(e)
+        // logger.debug('Error details:', e);
       }
 
       contentBlocks.push({
@@ -476,11 +489,7 @@ export function getAnthropicClient(model?: string, customApiKey?: string): Anthr
   const apiKey = customApiKey || getAnthropicApiKey()
 
   if (!apiKey) {
-    console.error(
-      chalk.red(
-        'No Anthropic API key configured. Please set up your API key using the /model command.',
-      ),
-    )
+    logger.error('No Anthropic API key configured. Please set up your API key using the /model command.');
   }
   anthropicClient = new Anthropic({
     apiKey,
@@ -623,7 +632,7 @@ export async function queryAnthropicModel(
   apiKey?: string,
 ): Promise<AssistantMessage> {
   if (process.env.NODE_ENV === 'development') {
-    console.log('querySonnet called with model:', options.model);
+    logger.debug('querySonnet called with model:', options.model);
   }
   
   // Use the configuration from utils/config for the provider
@@ -631,7 +640,7 @@ export async function queryAnthropicModel(
   const provider = config.primaryProvider;
   const modelName = options?.model || config.largeModelName;
   
-  console.log(`Using provider ${provider} with model ${modelName}`);
+  logger.debug(`Using provider ${provider} with model ${modelName}`);
   
   // For OpenAI, Mistral, or other providers, use the respective query function
   if (provider !== 'anthropic') {
@@ -746,7 +755,7 @@ async function queryAnthropicModelWithPromptCaching(
       
       // Log API call details
       const modelToUse = options?.model || 'claude-3-sonnet-20240229'
-      console.log(`🔄 API Call: Anthropic | Model: ${modelToUse} | Endpoint: ${anthropic.baseURL || 'https://api.anthropic.com/v1'}/messages`)
+      logApiCall('Anthropic', modelToUse, anthropic.baseURL || 'https://api.anthropic.com/messages');
       
       const apiResponse = await anthropic.messages.create({
         model: modelToUse,
@@ -787,8 +796,8 @@ async function queryAnthropicModelWithPromptCaching(
     // Return formatted response with safer content handling and debugging
     try {
       if (process.env.NODE_ENV === 'development') {
-        console.log('Raw response content:', JSON.stringify(response?.content));
-        console.log('Response structure:', Object.keys(response || {}));
+        logger.debug('Raw response content:', JSON.stringify(response?.content));
+        logger.debug('Response structure:', Object.keys(response || {}));
       }
       
       const normalizedContent = normalizeContentFromAPI(response?.content);
@@ -815,7 +824,7 @@ async function queryAnthropicModelWithPromptCaching(
         uuid: randomUUID(),
       }
     } catch (error) {
-      console.error('Error formatting response:', error);
+      logger.error('Error formatting response:', error);
       return createAssistantAPIErrorMessage('Error processing response');
     }
   } catch (error) {
@@ -843,7 +852,7 @@ function getAssistantMessageFromError(error: unknown): AssistantMessage {
   }
   if (error instanceof Error) {
     if(process.env.NODE_ENV === 'development') {
-      console.log(error)
+      logger.debug('Error details:', error);
     }
     return createAssistantAPIErrorMessage(
       `${API_ERROR_MESSAGE_PREFIX}: ${error.message}`,
@@ -994,8 +1003,8 @@ export async function queryOpenAI(
 
   try {
     if (process.env.NODE_ENV === 'development') {
-      console.log('OpenAI raw response content:', JSON.stringify(response?.content));
-      console.log('OpenAI response structure:', Object.keys(response || {}));
+      logger.debug('Raw response content:', JSON.stringify(response?.content));
+      logger.debug('Response structure:', Object.keys(response || {}));
     }
     
     const normalizedContent = normalizeContentFromAPI(response.content);
@@ -1022,7 +1031,7 @@ export async function queryOpenAI(
       uuid: randomUUID(),
     }
   } catch (error) {
-    console.error('Error formatting OpenAI response:', error);
+    logger.error('Error formatting OpenAI response:', error);
     return createAssistantAPIErrorMessage('Error processing OpenAI response');
   }
 }
@@ -1049,7 +1058,7 @@ export async function queryHaiku({
   const provider = config.primaryProvider || 'anthropic'
   const smallModel = config.smallModelName || SMALL_FAST_MODEL
   
-  console.log(`queryHaiku using provider: ${provider} with model: ${smallModel}`)
+  logger.debug(`queryHaiku using provider: ${provider} with model: ${smallModel}`);
   
   // For non-Anthropic providers, use the OpenAI-compatible interface
   if (provider !== 'anthropic') {
@@ -1140,7 +1149,7 @@ export async function queryHaiku({
           start = Date.now()
           
           // Log API call details 
-          console.log(`🔄 API Call: ${config.primaryProvider} | Model: ${smallModel} | Endpoint: ${anthropic.baseURL || 'https://api.anthropic.com/v1'}/messages`)
+          logApiCall(config.primaryProvider, smallModel, anthropic.baseURL || 'https://api.anthropic.com/messages');
           
           const apiResponse = await anthropic.messages.create({
             model: smallModel,

@@ -8,6 +8,104 @@ import { promises as fsPromises } from 'fs'
 import type { LogOption, SerializedMessage } from '../types/logs'
 import { MACRO } from '../constants/macros'
 import { PRODUCT_COMMAND } from '../constants/product'
+import chalk from 'chalk'
+
+// Add a new utility for structured logging
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export function createComponentLogger(componentName: string) {
+  // Determine if we're in a CLI environment
+  const isCLI = process.stdout?.isTTY || false;
+
+  return {
+    debug: (message: string, data?: any) => {
+      const prefix = `[${componentName}]`;
+      const formattedPrefix = isCLI ? chalk.gray(prefix) : prefix;
+      
+      // If in CLI mode, apply gray formatting to the entire message, not just the prefix
+      if (isCLI) {
+        // For large data objects/long messages, format them differently to maintain readability 
+        if (data) {
+          if (typeof data === 'string' && data.length > 100) {
+            // For long text data, format both message and data in gray
+            console.debug(formattedPrefix, chalk.gray(message), '\n', chalk.gray(data));
+          } else if (typeof data === 'object') {
+            // For objects, format message in gray but keep object unformatted for readability
+            console.debug(formattedPrefix, chalk.gray(message), data);
+          } else {
+            // For simple data, format both in gray
+            console.debug(formattedPrefix, chalk.gray(message), chalk.gray(String(data)));
+          }
+        } else {
+          // Simple message with no data - format it all in gray
+          console.debug(formattedPrefix, chalk.gray(message));
+        }
+      } else {
+        // Non-CLI environment - no formatting
+        if (data) {
+          console.debug(prefix, message, data);
+        } else {
+          console.debug(prefix, message);
+        }
+      }
+    },
+    
+    info: (message: string, data?: any) => {
+      const prefix = `[${componentName}]`;
+      const formattedPrefix = isCLI ? chalk.blue(prefix) : prefix;
+      
+      if (isCLI) {
+        if (data) {
+          console.info(formattedPrefix, chalk.blue(message), data);
+        } else {
+          console.info(formattedPrefix, chalk.blue(message));
+        }
+      } else {
+        if (data) {
+          console.info(prefix, message, data);
+        } else {
+          console.info(prefix, message);
+        }
+      }
+    },
+    
+    warn: (message: string, data?: any) => {
+      const prefix = `[${componentName}]`;
+      const formattedPrefix = isCLI ? chalk.yellow(prefix) : prefix;
+      
+      if (isCLI) {
+        if (data) {
+          console.warn(formattedPrefix, chalk.yellow(message), data);
+        } else {
+          console.warn(formattedPrefix, chalk.yellow(message));
+        }
+      } else {
+        if (data) {
+          console.warn(prefix, message, data);
+        } else {
+          console.warn(prefix, message);
+        }
+      }
+    },
+    
+    error: (message: string, error?: unknown) => {
+      const prefix = `[${componentName}]`;
+      const formattedPrefix = isCLI ? chalk.red(prefix) : prefix;
+      
+      if (isCLI) {
+        console.error(formattedPrefix, chalk.red(message));
+      } else {
+        console.error(prefix, message);
+      }
+      
+      if (error) {
+        console.error(error);
+        logError(error);
+      }
+    }
+  };
+}
+
 const IN_MEMORY_ERROR_LOG: Array<{
   error: string
   timestamp: string
