@@ -13,6 +13,9 @@ export * from './base/BaseTool';
 // Export registry functions
 export * from './registry';
 
+// Export metadata functions
+export * from './metadata';
+
 // Re-export all tools from each category
 export * from './filesystem';
 export * from './shell';

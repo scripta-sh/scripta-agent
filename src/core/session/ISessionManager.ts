@@ -1,4 +1,4 @@
-import { Message } from '../../query';
+import { Message } from '../agent';
 import { Tool } from '../../Tool';
 import { GlobalConfig as Config } from '../../utils/config';
 

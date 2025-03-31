@@ -1,6 +1,6 @@
 import { ILLMProvider, LLMProviderOptions } from './ILLMProvider';
 import { Tool } from '../../Tool';
-import { UserMessage, AssistantMessage } from '../../query';
+import { UserMessage, AssistantMessage } from '../agent';
 import { AbortSignal } from 'node-abort-controller';
 import { createComponentLogger } from '../../utils/log';
 import { logError } from '../../utils/log';

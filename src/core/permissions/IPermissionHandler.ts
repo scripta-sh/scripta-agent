@@ -1,5 +1,5 @@
 import { Tool } from '../../Tool';
-import { AssistantMessage } from '../../query';
+import { AssistantMessage } from '../agent';
 
 // Define a simpler context for permission handling
 export type PermissionHandlerContext = {

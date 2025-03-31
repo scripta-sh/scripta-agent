@@ -1,4 +1,4 @@
-import { Message } from '../../query';
+import { Message } from '../../core/agent';
 import {
 	ISessionManager,
 	SessionState,
@@ -193,11 +193,10 @@ export class CliSessionManager implements ISessionManager {
 		const currentMessages = messagesGetter();
 		logger.debug(`Current messages in React state: ${currentMessages.length}`);
 		
-		if (this.messagesSetter) {
-			logger.debug(`Saving ${uniqueMessages.length} messages to state`);
-			// Clone messages array to ensure React recognizes the change
-			this.messagesSetter([...uniqueMessages]);
-		}
+		// Use messagesSetter from the initialized values
+		logger.debug(`Saving ${uniqueMessages.length} messages to state`);
+		// Clone messages array to ensure React recognizes the change
+		messagesSetter([...uniqueMessages]);
 		
 		// Wait a short time to ensure the state update has propagated
 		await new Promise(resolve => setTimeout(resolve, 5));

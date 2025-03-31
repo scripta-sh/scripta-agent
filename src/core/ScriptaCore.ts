@@ -1,8 +1,8 @@
 // src/core/ScriptaCore.ts
 
-// Define required types from other modules (will need adjustment)
-import { Message, UserMessage, AssistantMessage } from '../core/agent'; // Using agent types directly
-import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage, CANCEL_MESSAGE } from '../utils/messages.js';
+// Define required types from other modules
+import { Message, UserMessage, AssistantMessage } from './agent'; // Import from local agent directory (TypeScript will handle the extension)
+import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage, CANCEL_MESSAGE } from '../utils/messages';
 import { Tool } from './tools/interfaces/Tool'; // Import Tool from core
 import { getEnabledTools, getAllTools } from './tools/registry'; // Import registry functions
 import { getContext } from '../context'; // For generating context string

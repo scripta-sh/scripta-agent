@@ -1,7 +1,7 @@
 import { ILLMProvider, LLMProviderOptions } from './ILLMProvider';
 import { ProviderFactory } from './ProviderFactory';
 import { Tool } from '../../Tool';
-import { UserMessage, AssistantMessage } from '../../query';
+import { UserMessage, AssistantMessage } from '../agent';
 import { AbortSignal } from 'node-abort-controller';
 import { createComponentLogger } from '../../utils/log';
 import { getGlobalConfig } from '../../utils/config';

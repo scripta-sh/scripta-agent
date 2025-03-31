@@ -9,7 +9,7 @@ import { IPermissionHandler } from '../permissions/IPermissionHandler';
 import { Message, AssistantMessage, UserMessage, ToolUseContext, BinaryFeedbackResult } from './types';
 import { queryWithBinaryFeedback } from './utils';
 import { runToolsConcurrently, runToolsSerially } from './ToolExecutor';
-import { createAssistantMessage } from '../../utils/messages.js';
+import { createAssistantMessage } from '../../utils/messages';
 import { normalizeMessagesForAPI } from '../../utils/messages';
 import { formatSystemPromptWithContext } from '../constants/providerErrors';
 import { llmService } from '../providers';

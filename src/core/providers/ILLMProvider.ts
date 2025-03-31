@@ -1,5 +1,5 @@
 import { Tool } from '../../Tool';
-import { UserMessage, AssistantMessage } from '../../query';
+import { UserMessage, AssistantMessage } from '../agent';
 import { AbortSignal } from 'node-abort-controller';
 
 /**

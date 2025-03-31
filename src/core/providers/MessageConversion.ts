@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { ContentBlock } from '@anthropic-ai/sdk/resources/messages/messages';
-import { UserMessage, AssistantMessage } from '../../query';
+import { UserMessage, AssistantMessage } from '../agent';
 import { nanoid } from 'nanoid';
 import { createComponentLogger } from '../../utils/log';
 

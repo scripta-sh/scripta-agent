@@ -39,8 +39,8 @@ import {
   type BinaryFeedbackResult,
   type Message as MessageType,
   type ProgressMessage,
-  // Removed "query" import - we're using ScriptaCore's processInput instead
-} from '../query'
+  // Imported from core/agent instead of query
+} from '../core/agent'
 import type { WrappedClient } from '../services/mcpClient'
 import type { Tool } from '../core/tools/types'
 import { getTool, getToolOrThrow } from '../core/tools'
