@@ -3,7 +3,8 @@
 // Define required types from other modules (will need adjustment)
 import { Message, UserMessage, AssistantMessage } from '../core/agent'; // Using agent types directly
 import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage, CANCEL_MESSAGE } from '../utils/messages.js';
-import { Tool } from '../Tool';
+import { Tool } from './tools/interfaces/Tool'; // Import Tool from core
+import { getEnabledTools, getAllTools } from './tools/registry'; // Import registry functions
 import { getContext } from '../context'; // For generating context string
 import { getSystemPrompt } from './constants/prompts';
 import { getSlowAndCapableModel } from '../utils/model';
@@ -303,12 +304,15 @@ export async function* processInput(
                 const provider = config?.primaryProvider ?? 'anthropic';
                 // modelToUse is already determined above the try block
 
-                // Call queryLlmService directly
+                // Get enabled tools from the registry
+                const enabledTools = await getEnabledTools();
+                
+                // Call queryLlmService directly with tools from registry
                 assistantResponse = await queryLlmService(
                     normalizedMessages,
                     formattedSystemPromptParts,
                     config?.largeModelMaxTokens ?? 0,
-                    initialState.tools, 
+                    enabledTools, 
                     abortController.signal,
                     {
                         model: modelToUse, 
@@ -410,12 +414,16 @@ export async function* processInput(
                         const provider = config?.primaryProvider ?? 'anthropic'; 
                         let nextAssistantResponse: AssistantMessage | null = null;
 
-                        // Call queryLlmService directly
+                        // Get enabled tools from the registry (using the same tools as before)
+                        // We could cache this but for consistency let's call it again
+                        const enabledTools = await getEnabledTools();
+                        
+                        // Call queryLlmService directly with tools from registry
                         nextAssistantResponse = await queryLlmService(
                             normalizedMessages,
                             formattedSystemPromptParts, 
                             config?.largeModelMaxTokens ?? 0,
-                            initialState.tools, 
+                            enabledTools, 
                             abortController.signal, 
                             {
                                 model: modelToUse, 

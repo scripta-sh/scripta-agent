@@ -20,6 +20,7 @@ import { Command } from '@commander-js/extra-typings'
 import { ask } from '../utils/ask'
 import { hasPermissionsToUseTool } from '../permissions'
 import { getTools } from '../tools'
+import { initializeCore } from '../core/initialization'
 import {
   getGlobalConfig,
   getCurrentProjectConfig,
@@ -177,6 +178,9 @@ async function setup(
 
   // Always grant read permissions for original working dir
   grantReadPermissionForOriginalDir()
+  
+  // Initialize the core components and tools
+  await initializeCore()
 
   // If --dangerously-skip-permissions is set, verify we're in a safe environment
   if (dangerouslySkipPermissions) {

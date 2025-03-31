@@ -10,8 +10,8 @@ import {
 import { getHistory as getCliHistory, addToHistory as addToCliHistory } from '../../history';
 import { getCwd as getCliCwd, setCwd as setCliCwd } from '../../utils/state';
 import { getGlobalConfig, GlobalConfig } from '../../utils/config'; // Use getGlobalConfig
-import { Tool } from '../../Tool';
-import { getTools } from '../../tools';
+import { Tool } from '../../core/tools/interfaces/Tool'; // Import Tool from core
+import { getEnabledTools } from '../../core/tools/registry'; // Import registry function
 import chalk from 'chalk';
 import { createComponentLogger } from '../../utils/log';
 
@@ -54,7 +54,7 @@ export class CliSessionManager implements ISessionManager {
 		const messages = messagesGetter();
 		const currentWorkingDirectory = getCliCwd(); // Assuming sync
 		const config: GlobalConfig = getGlobalConfig(); // Fetch current global config
-		const tools: Tool[] = await getTools(); // Now properly await the tools promise
+		const tools: Tool[] = await getEnabledTools(); // Get enabled tools from registry
 		const history: string[] = await getCliHistory(); // Fetch history
 
 		logger.debug(`getSessionState returning ${messages.length} messages`);
