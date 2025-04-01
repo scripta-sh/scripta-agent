@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { BaseTool } from '../../base/BaseTool'
 import { DESCRIPTION, PROMPT } from './prompt'
+import { ToolUseContext } from '../../base/ToolUseContext'
 
 // Allow any input object since MCP tools define their own schemas
 const inputSchema = z.object({}).passthrough()
@@ -38,7 +39,7 @@ export class CoreMCPTool extends BaseTool {
   }
 
   // Overridden in mcpClient.ts
-  async *call() {
+  async *call(input: any, { abortSignal }: ToolUseContext) {
     yield {
       type: 'result',
       data: '',

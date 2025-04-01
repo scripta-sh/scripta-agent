@@ -64,7 +64,9 @@ export class CoreMemoryReadTool extends BaseTool {
     return { result: true };
   }
 
-  async *call({ file_path }: MemoryReadToolInput) {
+  async *call({ file_path }: MemoryReadToolInput,
+    { abortSignal }: ToolUseContext
+  ) {
     mkdirSync(MEMORY_DIR, { recursive: true });
 
     // If a specific file is requested, return its contents

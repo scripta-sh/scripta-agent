@@ -109,7 +109,7 @@ export class CoreFileWriteTool extends BaseTool {
 
   async *call(
     { file_path, content }: FileWriteToolInput, 
-    { readFileTimestamps }: ToolUseContext
+    { readFileTimestamps, abortSignal }: ToolUseContext
   ) {
     const fullFilePath = isAbsolute(file_path)
       ? file_path

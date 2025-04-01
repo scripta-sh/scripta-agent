@@ -456,6 +456,22 @@ export function REPL({
   // Use local PermissionRequest type for state
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
 
+  // Log state changes
+  const loggedSetIsLoading = useCallback((value: boolean) => {
+    logger.debug(`Setting isLoading to: ${value}`);
+    setIsLoading(value);
+  }, [setIsLoading]);
+
+  const loggedSetPermissionRequest = useCallback((value: PermissionRequest | null) => {
+    logger.debug(`Setting permissionRequest to: ${value ? `Object (Tool: ${value.toolName})` : 'null'}`);
+    setPermissionRequest(value);
+  }, [setPermissionRequest]);
+  
+  const loggedSetToolUseConfirm = useCallback((value: ToolUseConfirm | null) => {
+    logger.debug(`Setting toolUseConfirm to: ${value ? `Object (Tool: ${value.tool.name})` : 'null'}`);
+    setToolUseConfirm(value);
+  }, [setToolUseConfirm]);
+
   // Define coreEngineRef at the top level
   const coreEngineRef = useRef<AsyncGenerator<CoreEvent, void, ToolResultBlockParam | undefined> | null>(null);
 
@@ -499,20 +515,12 @@ export function REPL({
   const permissionHandler = useMemo(() => {
     logger.debug(`Creating CliPermissionHandler with permission request state setter`);
     return new CliPermissionHandler(
-      // For tool use confirmation
-      setToolUseConfirm, 
-      // For simple permission requests
-      (simplifiedRequest) => {
-        if (simplifiedRequest) {
-          // Use type assertion to avoid linter errors
-          logger.debug(`Setting permission request: ${(simplifiedRequest as any).toolName || "unnamed tool"}`);
-        } else {
-          logger.debug(`Clearing permission request`);
-        }
-        setPermissionRequest(simplifiedRequest);
-      }
+      // For tool use confirmation - use logged setter
+      loggedSetToolUseConfirm, 
+      // For simple permission requests - use logged setter
+      loggedSetPermissionRequest
     );
-  }, [setToolUseConfirm, setPermissionRequest]);
+  }, [loggedSetToolUseConfirm, loggedSetPermissionRequest]);
 
   // Effect to fetch logo data
   useEffect(() => {
@@ -543,7 +551,8 @@ export function REPL({
     if (!isLoading) {
       return
     }
-    setIsLoading(false)
+    // Use logged setter
+    loggedSetIsLoading(false)
     if (toolUseConfirm) {
       // Tool use confirm handles the abort signal itself
       toolUseConfirm.onAbort()
@@ -704,6 +713,9 @@ export function REPL({
           logger.warn(`Could not find message ${coreEvent.message.uuid} to finalize.`);
           return prevMessages;
         });
+        // Stop loading and clear controller as this ends the turn
+        loggedSetIsLoading(false); 
+        setAbortController(null);
         return undefined; // Does not yield back to generator
 
       case 'ProgressUpdate':
@@ -722,6 +734,9 @@ export function REPL({
         logger.error(`Core Error: ${coreEvent.message}`, coreEvent.error);
         const errorMsg = createAssistantAPIErrorMessage(coreEvent.message);
         setMessages(oldMessages => [...oldMessages, errorMsg]);
+        // Stop loading and clear controller as this ends the turn
+        loggedSetIsLoading(false); 
+        setAbortController(null);
         // Potentially yield an error tool result if tied to a tool
         if (coreEvent.toolUseId) {
            return {
@@ -748,126 +763,93 @@ export function REPL({
         let toolToUse: Tool | null = null;
 
         try {
-          // Call getToolOrThrow with only the tool name
+          // Get the tool - ScriptaCore already handled permissions before yielding this event
           toolToUse = getToolOrThrow(coreEvent.toolName);
-          logger.debug(`Found tool: ${toolToUse.name}`);
+          logger.debug(`Executing tool: ${toolToUse.name} (Permission already granted by Core)`);
+          // Use logged setter
+          loggedSetIsLoading(true); // Show loading while tool executes
 
-          // Construct PermissionHandlerContext
-          const permissionContext: PermissionHandlerContext = {
-            abortSignal: abortController.signal, // Use the signal from the passed controller
-            options: { // Pass relevant options
-              dangerouslySkipPermissions,
-              tools,
-              // Add other relevant options from Props if needed
-            },
-            // readFileTimestamps: {}, // Required by ToolUseContext, provide if available, else empty
-            sessionManager: sessionManager, // Pass the session manager
-            sessionId: 'cli-session' // Assuming a fixed session ID for CLI
+          // Construct ToolUseContext required by tool.call
+          const lastMessage = messages[messages.length - 1];
+          const messageUuid = lastMessage?.uuid ?? 'unknown-message-uuid'; // Provide a fallback
+
+          const toolUseContext: ToolUseContext = { // Match the type from Tool.ts
+              uuid: coreEvent.toolUseId, // Use the ID from the event
+              messageUuid: messageUuid,
+              cwd: getCwd(), // Get current working directory
+              abortSignal: abortController.signal, // Pass the abort signal, matching the interface
+              // Add readFileTimestamps for file validation tools
+              readFileTimestamps: readFileTimestamps.current, 
+              options: {
+                  dangerouslySkipPermissions: dangerouslySkipPermissions,
+                  forkNumber: forkNumber, 
+                  messageLogName: messageLogName,
+                  tools: tools
+              },
           };
 
-          // Check permission
-          const hasPermission = await permissionHandler.checkPermission(toolToUse, coreEvent.toolInput, permissionContext);
+          try {
+              // Execute the tool using tool.call
+              const output = await toolToUse.call(coreEvent.toolInput, toolUseContext); 
 
-          // Pass undefined for the optional assistantMessage argument
-          if (hasPermission || await permissionHandler.requestPermission(toolToUse, coreEvent.toolInput, permissionContext, undefined)) {
-            logger.debug(`Permission granted for tool: ${toolToUse.name}`);
-            setIsLoading(true); // Show loading while tool executes
+              // --- Process Tool Output --- 
+              let finalResult: any = null;
+              let resultForAssistant: string | null = null;
 
-            // Construct ToolUseContext required by tool.call
-            // Get the latest message ID (likely the assistant message requesting the tool)
-            const lastMessage = messages[messages.length - 1];
-            const messageUuid = lastMessage?.uuid ?? 'unknown-message-uuid'; // Provide a fallback
+              if (typeof output === 'object' && output !== null && typeof (output as any)[Symbol.asyncIterator] === 'function') {
+                  // ... (generator handling) ...
+                  logger.debug(`Tool ${toolToUse.name} returned an async generator.`);
+                  const generator = output as AsyncGenerator<any, any, any>;
+                  let lastYieldedValue: any = null;
 
-            const toolUseContext: ToolUseContext = { // Match the type from Tool.ts
-                uuid: coreEvent.toolUseId, // Use the ID from the event
-                messageUuid: messageUuid,
-                cwd: getCwd(), // Get current working directory
-                abortSignal: abortController.signal, // Pass the abort signal
-                // Create the nested 'options' object expected by some tools
-                options: {
-                    dangerouslySkipPermissions: permissionContext.options.dangerouslySkipPermissions,
-                    // Pass other relevant options from props or state if needed by tools like AgentTool
-                    // These might need to be retrieved from the main component props or state
-                    forkNumber: forkNumber, 
-                    messageLogName: messageLogName,
-                    // verbose: verbose, // Assuming verbose might come from props/state
-                    tools: tools // Pass the list of tools
-                },
-                 // readFileTimestamps might also be needed at this level if used by tools directly
-                // readFileTimestamps: readFileTimestamps.current 
-            };
-
-            // Abort handling should primarily be managed via the signal passed in the context.
-
-            try {
-                // Execute the tool using tool.call which might be sync or async generator
-                // Pass the correctly structured ToolUseContext
-                const output = await toolToUse.call(coreEvent.toolInput, toolUseContext); 
-
-                 // --- Process Tool Output (Handling both Generator and Direct Return) ---
-                 let finalResult: any = null;
-                 let resultForAssistant: string | null = null; // Textual summary for LLM
-
-                 if (typeof output === 'object' && output !== null && typeof (output as any)[Symbol.asyncIterator] === 'function') {
-                     // Handle Async Generator (e.g., streaming tools)
-                     logger.debug(`Tool ${toolToUse.name} returned an async generator.`);
-                     const generator = output as AsyncGenerator<any, any, any>;
-                     let lastYieldedValue: any = null;
-
-                     while (true) {
-                         const { value, done } = await generator.next();
-                         if (done) {
-                             finalResult = value; // The final return value of the generator
-                             logger.debug(`Tool generator finished, final result:`, finalResult);
-                             break;
-                         } else {
-                             lastYieldedValue = value;
-                             logger.debug(`Tool yielded value:`, value);
-                             // Handle intermediate yields (e.g., update UI, progress)
-                             // For simplicity, we'll just log for now
-                             if (typeof value === 'object' && value !== null) {
-                                 if (value.resultForAssistant) {
-                                     resultForAssistant = value.resultForAssistant; // Capture LLM summary if provided
-                                 }
-                                 // Could update UI incrementally here based on yielded value structure
-                             }
-                         }
-                     }
-                     // If generator returned nothing explicitly, use the last yielded value
-                     if (finalResult === undefined && lastYieldedValue !== null) {
-                         finalResult = lastYieldedValue;
-                         logger.debug(`Generator returned undefined, using last yielded value as final result.`);
-                     }
-                     // If the final result has a specific format for the assistant, use it
-                     if (typeof finalResult === 'object' && finalResult !== null && finalResult.resultForAssistant) {
-                       resultForAssistant = finalResult.resultForAssistant;
-                     }
-
-                 } else {
-                     // Handle Direct Return Value (non-generator)
-                      logger.debug(`Tool ${toolToUse.name} returned directly:`, output);
-                     finalResult = output;
-                      // Check if the direct result provides a specific summary
-                      if (typeof finalResult === 'object' && finalResult !== null && finalResult.resultForAssistant) {
-                          resultForAssistant = finalResult.resultForAssistant;
+                  while (true) {
+                      const { value, done } = await generator.next();
+                      if (done) {
+                          finalResult = value;
+                          logger.debug(`Tool generator finished, final result:`, finalResult);
+                          break;
+                      } else {
+                          lastYieldedValue = value;
+                          logger.debug(`Tool yielded value:`, value);
+                          if (typeof value === 'object' && value !== null) {
+                              if (value.resultForAssistant) {
+                                  resultForAssistant = value.resultForAssistant;
+                              }
+                          }
                       }
-                 }
+                  }
+                  if (finalResult === undefined && lastYieldedValue !== null) {
+                      finalResult = lastYieldedValue;
+                      logger.debug(`Generator returned undefined, using last yielded value as final result.`);
+                  }
+                  if (typeof finalResult === 'object' && finalResult !== null && finalResult.resultForAssistant) {
+                    resultForAssistant = finalResult.resultForAssistant;
+                  }
+              } else {
+                  // ... (direct return handling) ...
+                  logger.debug(`Tool ${toolToUse.name} returned directly:`, output);
+                  finalResult = output;
+                  if (typeof finalResult === 'object' && finalResult !== null && finalResult.resultForAssistant) {
+                      resultForAssistant = finalResult.resultForAssistant;
+                  }
+              }
 
-                 // --- Construct ToolResultBlockParam ---
-                  toolResult = {
-                    type: 'tool_result',
-                    tool_use_id: coreEvent.toolUseId,
-                     // Use resultForAssistant if available, otherwise stringify the final result
-                     // Wrap the string content in a text block array for API compatibility
-                     content: [{
-                         type: 'text',
-                         text: resultForAssistant ?? (typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult ?? 'Tool executed successfully.', null, 2))
-                     }], 
-                     is_error: false // Assuming success if we reached here without error
-                 };
+              // --- Construct ToolResultBlockParam --- 
+               toolResult = {
+                 type: 'tool_result',
+                 tool_use_id: coreEvent.toolUseId,
+                 content: [{
+                      type: 'text',
+                      text: resultForAssistant ?? (typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult ?? 'Tool executed successfully.', null, 2))
+                  }], 
+                  is_error: false
+              };
+              
+              // Attach the raw output data for potential UI rendering later
+              (toolResult as any).rawOutputData = finalResult; 
 
-
-            } catch (error: any) {
+          } catch (error: any) {
+               // ... (existing error handling for tool execution) ...
                logger.error(`Error executing tool ${coreEvent.toolName}:`, error);
                let errorMessage = `Error executing tool: ${coreEvent.toolName}.`;
                if (error instanceof Error) {
@@ -876,50 +858,33 @@ export function REPL({
                 toolResult = {
                   type: 'tool_result',
                   tool_use_id: coreEvent.toolUseId,
-                 content: errorMessage,
-                 is_error: true
+                  content: [{ type: 'text', text: errorMessage }],
+                  is_error: true
                 };
-            } finally {
-                 // Clean up?
-                 // No abort listener to remove here for toolUseContext
-                 setIsLoading(false); // Stop loading indicator
-              }
-
-            } else {
-              logger.debug(`Permission denied for tool: ${coreEvent.toolName}`);
-             // Construct result object indicating permission denial
-              toolResult = {
-                type: 'tool_result',
-                tool_use_id: coreEvent.toolUseId,
-              // Format content as a text block array for API compatibility
-              content: [{ type: 'text', text: `Permission denied by user for tool: ${coreEvent.toolName}` }], 
-              is_error: true // Treat permission denial as an error for the LLM
-            };
-            // Add feedback message for denying permission
-             // Use createAssistantAPIErrorMessage to create the message and mark it as an error
-             const permissionDeniedMsg = createAssistantAPIErrorMessage(
-                 `User rejected ${toolToUse?.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}`
-             );
-             setMessages(oldMessages => [...oldMessages, permissionDeniedMsg]);
-             // Ensure loading state is reset when permission is denied
-             setIsLoading(false); 
-            }
-          } catch (error: any) {
-          logger.error(`Error preparing or checking permission for tool ${coreEvent.toolName}:`, error);
+          } finally {
+               // Use logged setter
+               loggedSetIsLoading(false);
+          }
+        
+        // This top-level catch handles errors finding the tool itself
+        } catch (error: any) {
+          logger.error(`Error finding or preparing tool ${coreEvent.toolName}:`, error);
           let errorMessage = `Error setting up tool: ${coreEvent.toolName}.`;
             if (error instanceof Error) {
               errorMessage += ` ${error.message}`;
             }
-          // Construct result object directly for setup errors
             toolResult = {
               type: 'tool_result',
               tool_use_id: coreEvent.toolUseId,
-              content: errorMessage,
+              content: [{ type: 'text', text: errorMessage }],
               is_error: true
             };
+            // Also ensure loading stops if tool setup fails
+            loggedSetIsLoading(false);
         }
 
-        // Log the result being sent back (careful with large content)
+        // Log and return result
+        // ... (existing logging) ...
          logger.debug(`Sending result for ${coreEvent.toolUseId} back to core:`, {
           type: toolResult?.type,
           tool_use_id: toolResult?.tool_use_id,
@@ -928,8 +893,6 @@ export function REPL({
              `${Math.min(toolResult.content.length, 100)} chars` +
              (toolResult.content.length > 100 ? '...' : '') : (toolResult?.content ? 'object/array' : 'null/undefined')
         });
-
-        // Return the result to the core generator
         return toolResult;
 
       default:
@@ -977,7 +940,8 @@ export function REPL({
         return;
     }
 
-    setIsLoading(true);
+    // Use logged setter
+    loggedSetIsLoading(true);
 
     try {
       // Define a constant session ID for the CLI
@@ -1050,8 +1014,9 @@ export function REPL({
         const errorMsg = createAssistantAPIErrorMessage("An unexpected error occurred.");
         setMessages(oldMessages => [...oldMessages, errorMsg]);
     } finally {
-        setIsLoading(false);
-        setAbortController(null); // Clear abort controller when done
+        // REMOVE loading/controller reset from here - handled within event handlers
+        // setIsLoading(false);
+        // setAbortController(null); // Clear abort controller when done
         coreEngineRef.current = null; // Clear the generator ref
     }
   }
@@ -1190,6 +1155,9 @@ export function REPL({
   const staticMessagesJSX = useMemo(() => messagesJSX.filter(_ => _.type === 'static').map(item => item.jsx), [messagesJSX]);
   const transientMessagesJSX = useMemo(() => messagesJSX.filter(_ => _.type === 'transient').map(item => item.jsx), [messagesJSX]);
 
+  // Log state right before render
+  logger.debug(`[REPL Render] State before render: isLoading=${isLoading}, permissionRequest=${!!permissionRequest}, toolUseConfirm=${!!toolUseConfirm}`);
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       {/* Use the render prop function and suppress potential type error */}
@@ -1238,41 +1206,47 @@ export function REPL({
             </>
         )}
 
-        {/* Conditionally render PromptInput, disabling if permissionRequest is active */}
-        <Box flexDirection="column">
-            {/* Always render PromptInput, but keep isDisabled logic */}
-            <PromptInput
-                commands={commands}
-                forkNumber={forkNumber}
-                messageLogName={messageLogName}
-                tools={tools}
-                // Disable if loading OR simple permission prompt OR tool use confirm UI is active
-                isDisabled={isLoading || !!permissionRequest || !!toolUseConfirm} 
-                isLoading={isLoading}
-                onQuery={onQuery}
-                debug={debug}
-                verbose={verbose}
-                messages={messages}
-                setToolJSX={setToolJSX}
-                onAutoUpdaterResult={setAutoUpdaterResult}
-                autoUpdaterResult={autoUpdaterResult}
-                input={inputValue}
-                onInputChange={setInputValue}
-                mode={inputMode}
-                onModeChange={setInputMode}
-                submitCount={submitCount}
-                onSubmitCountChange={setSubmitCount}
-                setIsLoading={setIsLoading}
-                setAbortController={setAbortController}
-                onShowMessageSelector={() =>
-                  setIsMessageSelectorVisible(prev => !prev)
-                }
-                setForkConvoWithMessagesOnTheNextRender={
-                  setForkConvoWithMessagesOnTheNextRender
-                }
-                readFileTimestamps={readFileTimestamps.current}
-            />
-        </Box>
+        {/* Conditionally render PromptInput, hiding if permissionRequest or toolUseConfirm is active */}
+        {!permissionRequest && !toolUseConfirm && 
+          !toolJSX?.shouldHidePromptInput &&
+          shouldShowPromptInput &&
+          !isMessageSelectorVisible &&
+          !binaryFeedbackContext &&
+          !showingCostDialog && (
+            <Box flexDirection="column">
+                <PromptInput
+                    commands={commands}
+                    forkNumber={forkNumber}
+                    messageLogName={messageLogName}
+                    tools={tools}
+                    // Only disable based on loading state now, as it's hidden during prompts
+                    isDisabled={isLoading} 
+                    isLoading={isLoading}
+                    onQuery={onQuery}
+                    debug={debug}
+                    verbose={verbose}
+                    messages={messages}
+                    setToolJSX={setToolJSX}
+                    onAutoUpdaterResult={setAutoUpdaterResult}
+                    autoUpdaterResult={autoUpdaterResult}
+                    input={inputValue}
+                    onInputChange={setInputValue}
+                    mode={inputMode}
+                    onModeChange={setInputMode}
+                    submitCount={submitCount}
+                    onSubmitCountChange={setSubmitCount}
+                    setIsLoading={setIsLoading}
+                    setAbortController={setAbortController}
+                    onShowMessageSelector={() =>
+                      setIsMessageSelectorVisible(prev => !prev)
+                    }
+                    setForkConvoWithMessagesOnTheNextRender={
+                      setForkConvoWithMessagesOnTheNextRender
+                    }
+                    readFileTimestamps={readFileTimestamps.current}
+                />
+            </Box>
+        )}
       </Box>
       {isMessageSelectorVisible && (
         <MessageSelector

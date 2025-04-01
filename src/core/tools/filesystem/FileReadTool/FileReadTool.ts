@@ -138,7 +138,7 @@ export class CoreFileReadTool extends BaseTool {
 
   async *call(
     { file_path, offset = 1, limit = undefined }: FileReadToolInput,
-    { readFileTimestamps }: ToolUseContext
+    { readFileTimestamps, abortSignal }: ToolUseContext
   ) {
     const ext = path.extname(file_path).toLowerCase()
     const fullFilePath = normalizeFilePath(file_path)

@@ -176,7 +176,7 @@ export class CoreFileEditTool extends BaseTool {
 
   async *call(
     { file_path, old_string, new_string }: FileEditToolInput,
-    { readFileTimestamps }: ToolUseContext
+    { readFileTimestamps, abortSignal }: ToolUseContext
   ) {
     const { patch, updatedFile } = applyEdit(file_path, old_string, new_string);
 

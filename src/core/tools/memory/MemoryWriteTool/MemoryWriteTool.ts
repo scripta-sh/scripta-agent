@@ -56,7 +56,9 @@ export class CoreMemoryWriteTool extends BaseTool {
     return { result: true };
   }
 
-  async *call({ file_path, content }: MemoryWriteToolInput) {
+  async *call({ file_path, content }: MemoryWriteToolInput,
+    { abortSignal }: ToolUseContext
+  ) {
     const fullPath = join(MEMORY_DIR, file_path);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, content, 'utf-8');

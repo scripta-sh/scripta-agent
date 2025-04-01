@@ -95,7 +95,9 @@ export class CoreNotebookReadTool extends BaseTool {
     return { result: true };
   }
 
-  async *call({ notebook_path }: NotebookReadToolInput) {
+  async *call({ notebook_path }: NotebookReadToolInput,
+    { abortSignal }: ToolUseContext
+  ) {
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path);

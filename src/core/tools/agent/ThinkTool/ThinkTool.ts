@@ -42,7 +42,7 @@ export class CoreThinkTool extends BaseTool {
     return false;
   }
 
-  async *call(input: ThinkToolInput, { messageId }: ToolUseContext) {
+  async *call(input: ThinkToolInput, { messageId, abortSignal }: ToolUseContext) {
     logEvent('tengu_thinking', {
       messageId,
       thoughtLength: input.thought.length.toString(),

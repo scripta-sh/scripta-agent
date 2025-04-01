@@ -164,7 +164,7 @@ export class CoreBashTool extends BaseTool {
 
   async *call(
     { command, timeout = 120000 }: BashToolInput,
-    { abortController, readFileTimestamps }: ToolUseContext
+    { abortSignal, readFileTimestamps }: ToolUseContext
   ) {
     let stdout = ''
     let stderr = ''
@@ -172,7 +172,7 @@ export class CoreBashTool extends BaseTool {
     // Execute commands
     const result = await PersistentShell.getInstance().exec(
       command,
-      abortController.signal,
+      abortSignal,
       timeout,
     )
     stdout += (result.stdout || '').trim() + EOL

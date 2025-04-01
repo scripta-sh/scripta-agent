@@ -172,7 +172,9 @@ export class CoreNotebookEditTool extends BaseTool {
     new_source,
     cell_type,
     edit_mode = 'replace',
-  }: NotebookEditToolInput) {
+  }: NotebookEditToolInput,
+  { abortSignal }: ToolUseContext
+  ) {
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path);

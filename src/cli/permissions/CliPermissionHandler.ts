@@ -192,6 +192,8 @@ export class CliPermissionHandler implements IPermissionHandler {
           onAllow: () => {
             logger.debug(`Permission request allowed by user`);
             this.setPermissionRequest(null);
+            // Also clear the detailed confirm state
+            this.setToolUseConfirm(null); 
             
             // Save permission based on tool type
             if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
@@ -203,6 +205,8 @@ export class CliPermissionHandler implements IPermissionHandler {
           onDeny: () => {
             logger.debug(`Permission request denied by user`);
             this.setPermissionRequest(null);
+            // Also clear the detailed confirm state
+            this.setToolUseConfirm(null); 
             handleAbort();
           }
         });

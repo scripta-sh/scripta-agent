@@ -312,6 +312,17 @@ export async function* processInput(
                     message: {
                         role: 'user',
                         content: [resultBlock] // Embed the ToolResultBlockParam here
+                    },
+                    // Populate the toolUseResult field for rendering components
+                    toolUseResult: {
+                        // Use the attached rawOutputData if available, otherwise fallback
+                        data: (resultBlock as any).rawOutputData ?? resultBlock.content, 
+                        // Extract the text from the first content block for resultForAssistant
+                        resultForAssistant: typeof resultBlock.content === 'string' 
+                            ? resultBlock.content // Handle legacy string content just in case
+                            : (Array.isArray(resultBlock.content) && resultBlock.content[0]?.type === 'text' 
+                                ? resultBlock.content[0].text 
+                                : '') // Fallback for empty/non-text
                     }
                 };
                 currentMessagesForTurn.push(toolResultUserMessage);
