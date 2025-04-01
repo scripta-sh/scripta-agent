@@ -75,7 +75,7 @@ import { CoreEvent } from '../core/agent/types'
 import { IPermissionHandler, PermissionHandlerContext } from "../core/permissions/IPermissionHandler";
 import { ToolUseContext } from '../core/tools/interfaces/Tool';
 import { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import { renderToolResultMessage } from '../cli/renderers/toolRenderers'
+import { PermissionRequest as ToolUseConfirmComponent } from '../components/permissions/PermissionRequest'
 import { CliSessionManager } from '../cli/session/CliSessionManager'
 import { setMessagesGetter, setMessagesSetter } from '../messages'
 import chalk from 'chalk'
@@ -113,272 +113,8 @@ interface PermissionPromptProps {
     request: PermissionRequest | null;
 }
 
-function PermissionPrompt({ request }: PermissionPromptProps) {
-    if (!request) {
-        return null;
-    }
-    
-    const { exit } = useApp();
-    const [selection, setSelection] = useState<'allow' | 'deny' | null>(null);
-    const { columns = 80 } = useTerminalSize();
-    const theme = getTheme();
-
-    // Add debug logging when component renders
-    console.debug(`[PermissionPrompt] Rendering prompt for tool: ${request.toolName}`);
-
-    useInput((input, key) => {
-        if (selection) return; // Already decided
-
-        if (input === 'y' || input === 'Y') {
-            console.debug(`[PermissionPrompt] User selected ALLOW for ${request.toolName}`);
-            setSelection('allow');
-            request.onAllow();
-        } else if (input === 'n' || input === 'N') {
-            console.debug(`[PermissionPrompt] User selected DENY for ${request.toolName}`);
-            setSelection('deny');
-            request.onDeny();
-        } else if (key.escape) {
-            console.debug(`[PermissionPrompt] User pressed ESC to deny ${request.toolName}`);
-            setSelection('deny'); // Treat escape as deny
-            request.onDeny();
-        }
-    });
-
-    // Render the tool input details based on tool type
-    const renderToolInput = () => {
-        switch (request.toolName) {
-            case 'Bash':
-                return (
-                    <Box flexDirection="column" marginTop={1} paddingX={2}>
-                        <Text color={theme.secondaryText}>Command:</Text>
-                        <Box marginLeft={2} marginTop={1}>
-                            <HighlightedCode
-                                code={request.toolInput.command || ''}
-                                language="bash"
-                            />
-                        </Box>
-                    </Box>
-                );
-            case 'Edit': {
-                const { file_path, old_string, new_string } = request.toolInput;
-                const file = existsSync(file_path) ? readFileSync(file_path, 'utf8') : '';
-                const patch = getPatch({
-                    filePath: file_path,
-                    fileContents: file,
-                    oldStr: old_string,
-                    newStr: new_string,
-                });
-                
-                return (
-                    <Box flexDirection="column">
-                        <Box 
-                            borderColor={theme.secondaryBorder}
-                            borderStyle="round"
-                            flexDirection="column"
-                            paddingX={1}
-                            marginY={1}
-                        >
-                            <Box paddingBottom={1}>
-                                <Text bold>{relative(getCwd(), file_path)}</Text>
-                            </Box>
-                            {intersperse(
-                                patch.map(p => (
-                                    // Wrap StructuredDiff in a Box and apply key there
-                                    <Box key={p.newStart}>
-                                        <StructuredDiff
-                                            patch={p}
-                                            dim={false}
-                                            width={columns - 12}
-                                        />
-                                    </Box>
-                                )),
-                                i => (
-                                    // @ts-ignore - Ink/React handles the key prop for Text
-                                    <Text color={theme.secondaryText} key={`ellipsis-${i}`}>
-                                        ...
-                                    </Text>
-                                ),
-                            )}
-                        </Box>
-                    </Box>
-                );
-            }
-            case 'Replace': {
-                const { file_path, content } = request.toolInput;
-                const fileExists = existsSync(file_path);
-                
-                // If file exists, show diff
-                if (fileExists) {
-                    const oldContent = readFileSync(file_path, detectFileEncoding(file_path));
-                    const hunks = getPatch({
-                        filePath: file_path,
-                        fileContents: oldContent.toString(),
-                        oldStr: oldContent.toString(),
-                        newStr: content,
-                    });
-
-                    return (
-                        <Box flexDirection="column">
-                            <Box 
-                                borderColor={theme.secondaryBorder}
-                                borderStyle="round"
-                                flexDirection="column"
-                                paddingX={1}
-                                marginY={1}
-                            >
-                                <Box paddingBottom={1}>
-                                    <Text bold>{relative(getCwd(), file_path)}</Text>
-                                </Box>
-                                {intersperse(
-                                    hunks.map(p => (
-                                        // Wrap StructuredDiff in a Box and apply key there
-                                        <Box key={p.newStart}>
-                                            <StructuredDiff
-                                                patch={p}
-                                                dim={false}
-                                                width={columns - 12}
-                                            />
-                                        </Box>
-                                    )),
-                                    i => (
-                                        // @ts-ignore - Ink/React handles the key prop for Text
-                                        <Text color={theme.secondaryText} key={`ellipsis-${i}`}>
-                                            ...
-                                        </Text>
-                                    ),
-                                )}
-                            </Box>
-                        </Box>
-                    );
-                } else {
-                    // If file doesn't exist, show new content
-                    return (
-                        <Box flexDirection="column">
-                            <Box 
-                                borderColor={theme.secondaryBorder}
-                                borderStyle="round"
-                                flexDirection="column"
-                                paddingX={1}
-                                marginY={1}
-                            >
-                                <Box paddingBottom={1}>
-                                    <Text bold>{relative(getCwd(), file_path)}</Text>
-                                </Box>
-                                <HighlightedCode
-                                    code={content || '(No content)'}
-                                    language={extname(file_path).slice(1)}
-                                />
-                            </Box>
-                        </Box>
-                    );
-                }
-            }
-            default:
-                if (request.toolInput && Object.keys(request.toolInput).length > 0) {
-                    // For other tools, show simplified input
-                    return (
-                        <Box marginTop={1} flexDirection="column">
-                            <Box
-                                borderColor={theme.secondaryBorder}
-                                borderStyle="round"
-                                flexDirection="column"
-                                paddingX={1}
-                                paddingY={1}
-                            >
-                                <HighlightedCode
-                                    code={JSON.stringify(request.toolInput, null, 2)}
-                                    language="json"
-                                />
-                            </Box>
-                        </Box>
-                    );
-                }
-                return null;
-        }
-    };
-
-    // Set title based on tool type
-    const getTitle = () => {
-        switch (request.toolName) {
-            case 'Bash':
-                return "Bash command";
-            case 'Edit':
-                return "Edit file";
-            case 'Replace':
-                const fileExists = existsSync(request.toolInput.file_path);
-                return fileExists ? "Edit file" : "Create file";
-            default:
-                return `Tool Request: ${request.toolName}`;
-        }
-    };
-
-    // Get prompt text based on tool type
-    const getPromptText = () => {
-        switch (request.toolName) {
-            case 'Edit':
-            case 'Replace': {
-                const { file_path } = request.toolInput;
-                const fileExists = existsSync(file_path);
-                return (
-                    <Text>
-                        Do you want to {fileExists ? 'make this edit to' : 'create'}{' '}
-                        <Text bold>{basename(file_path)}</Text>?
-                    </Text>
-                );
-            }
-            case 'Bash':
-                return <Text>Do you want to execute this command?</Text>;
-            default:
-                return <Text>Do you want to proceed?</Text>;
-        }
-    };
-
-    return (
-        <Box 
-            borderStyle="round" 
-            padding={1} 
-            flexDirection="column"
-            borderColor={theme.permission}
-            marginTop={1}
-        >
-            <PermissionRequestTitle
-                title={getTitle()}
-                riskScore={null}
-            />
-            
-            {renderToolInput()}
-            
-            <Box flexDirection="column" marginTop={1}>
-                {getPromptText()}
-                <Box marginTop={1}>
-                    <Text>Allow? (y/n)</Text>
-                    {selection === 'allow' && <>{' '}<Text color="green">(Allowed)</Text></>}
-                    {selection === 'deny' && <>{' '}<Text color="red">(Denied)</Text></>}
-                </Box>
-            </Box>
-        </Box>
-    );
-}
-
 // Create a logger for this component
 const logger = createComponentLogger('REPL');
-
-// We need a helper function to format assistant responses in gray
-// Add this near where the logger is defined
-function logAssistantResponse(text: string, isDuplicate = false) {
-  if (process.stdout?.isTTY) {
-    const prefix = isDuplicate ? 
-      chalk.gray('[REPL] Skipping duplicate assistant response:') : 
-      chalk.gray('[REPL] Adding new assistant response:');
-    
-    // Format the preview text in gray, truncating if necessary
-    const preview = text.substring(0, 50) + (text.length > 50 ? '...' : '');
-    console.debug(chalk.gray(`${prefix} ${preview}`));
-  } else {
-    // In non-CLI mode, use the regular logger
-    logger.debug(`${isDuplicate ? 'Skipping duplicate' : 'Adding new'} assistant response: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`);
-  }
-}
 
 export function REPL({
   commands,
@@ -453,25 +189,17 @@ export function REPL({
   const [mcpClientState, setMcpClientState] = useState<WrappedClient[]>([]);
   const [isDefaultModelState, setIsDefaultModelState] = useState<boolean>(true);
 
-  // Use local PermissionRequest type for state
-  const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
-
   // Log state changes
   const loggedSetIsLoading = useCallback((value: boolean) => {
     logger.debug(`Setting isLoading to: ${value}`);
     setIsLoading(value);
   }, [setIsLoading]);
 
-  const loggedSetPermissionRequest = useCallback((value: PermissionRequest | null) => {
-    logger.debug(`Setting permissionRequest to: ${value ? `Object (Tool: ${value.toolName})` : 'null'}`);
-    setPermissionRequest(value);
-  }, [setPermissionRequest]);
-  
   const loggedSetToolUseConfirm = useCallback((value: ToolUseConfirm | null) => {
     logger.debug(`Setting toolUseConfirm to: ${value ? `Object (Tool: ${value.tool.name})` : 'null'}`);
     setToolUseConfirm(value);
   }, [setToolUseConfirm]);
-
+  
   // Define coreEngineRef at the top level
   const coreEngineRef = useRef<AsyncGenerator<CoreEvent, void, ToolResultBlockParam | undefined> | null>(null);
 
@@ -517,10 +245,10 @@ export function REPL({
     return new CliPermissionHandler(
       // For tool use confirmation - use logged setter
       loggedSetToolUseConfirm, 
-      // For simple permission requests - use logged setter
-      loggedSetPermissionRequest
+      // Pass null or a dummy function for the simple prompt setter (no longer used)
+      () => {} // Or pass loggedSetPermissionRequest if keeping state temporarily
     );
-  }, [loggedSetToolUseConfirm, loggedSetPermissionRequest]);
+  }, [loggedSetToolUseConfirm /* Remove loggedSetPermissionRequest dependency if state removed */ ]);
 
   // Effect to fetch logo data
   useEffect(() => {
@@ -1156,7 +884,7 @@ export function REPL({
   const transientMessagesJSX = useMemo(() => messagesJSX.filter(_ => _.type === 'transient').map(item => item.jsx), [messagesJSX]);
 
   // Log state right before render
-  logger.debug(`[REPL Render] State before render: isLoading=${isLoading}, permissionRequest=${!!permissionRequest}, toolUseConfirm=${!!toolUseConfirm}`);
+  logger.debug(`[REPL Render] State before render: isLoading=${isLoading}, toolUseConfirm=${!!toolUseConfirm}`);
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -1198,16 +926,17 @@ export function REPL({
             />
           )}
 
-        {/* Conditionally render PermissionPrompt */}
-        { permissionRequest && (
-            <>
-              {console.debug("[REPL] Rendering permission request for:", permissionRequest.toolName)}
-              <PermissionPrompt request={permissionRequest} />
-            </>
+        {/* Render ToolUseConfirm component (which is actually PermissionRequest) when its state is set */}
+        { toolUseConfirm && (
+            <ToolUseConfirmComponent 
+              toolUseConfirm={toolUseConfirm} // Pass the state object as a prop
+              onDone={() => loggedSetToolUseConfirm(null)} // Clear state when done
+              verbose={verbose} // Pass verbose prop
+            />
         )}
 
-        {/* Conditionally render PromptInput, hiding if permissionRequest or toolUseConfirm is active */}
-        {!permissionRequest && !toolUseConfirm && 
+        {/* Conditionally render PromptInput, hiding if toolUseConfirm is active */}
+        {!toolUseConfirm && 
           !toolJSX?.shouldHidePromptInput &&
           shouldShowPromptInput &&
           !isMessageSelectorVisible &&
