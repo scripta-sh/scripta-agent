@@ -183,6 +183,7 @@ export class CliPermissionHandler implements IPermissionHandler {
         // commandPrefix logic might need adjustment or removal if not used
         const commandPrefix = null; 
 
+        /* --- COMMENT OUT SETTING THE SIMPLE PERMISSION REQUEST --- 
         // Set the permission request using the correct interface structure
         const userFacingName = tool.userFacingName ? tool.userFacingName(input) : tool.name;
         logger.debug(`Setting permission request for ${userFacingName}`);
@@ -195,7 +196,7 @@ export class CliPermissionHandler implements IPermissionHandler {
             // Also clear the detailed confirm state
             this.setToolUseConfirm(null); 
             
-            // Save permission based on tool type
+            // Save permission based on tool type (existing logic)
             if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
               logger.debug(`Granting filesystem permission for current request: ${tool.name}`);
               savePermission(tool, input, null);
@@ -210,7 +211,10 @@ export class CliPermissionHandler implements IPermissionHandler {
             handleAbort();
           }
         });
+        */
 
+        // Set ONLY the detailed tool use confirmation state
+        logger.debug(`Setting ToolUseConfirm state for ${tool.name}`);
         this.setToolUseConfirm({
           assistantMessage: placeholderAssistantMessage,
           tool,
