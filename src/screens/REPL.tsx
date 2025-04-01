@@ -80,7 +80,6 @@ import { CliSessionManager } from '../cli/session/CliSessionManager'
 import { setMessagesGetter, setMessagesSetter } from '../messages'
 import chalk from 'chalk'
 import { createComponentLogger } from '../utils/log'
-import { ConfigServiceProvider } from '../cli/config/ConfigServiceContext'
 
 type Props = {
   commands: Command[]
@@ -891,7 +890,6 @@ export function REPL({
   logger.debug(`[REPL Render] State before render: isLoading=${isLoading}, toolUseConfirm=${!!toolUseConfirm}`);
 
   return (
-    <ConfigServiceProvider configService={configService}>
       <Box flexDirection="column" flexGrow={1}>
         {/* Use the render prop function and suppress potential type error */}
         {/* @ts-ignore - Linter seems incorrect about Static prop types here */}
@@ -1023,7 +1021,6 @@ export function REPL({
         {/** Fix occasional rendering artifact */}
         <Newline />
       </Box>
-    </ConfigServiceProvider>
   )
 }
 
