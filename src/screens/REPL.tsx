@@ -110,10 +110,14 @@ interface PermissionRequest {
 
 // --- Permission Prompt Component uses local type --- 
 interface PermissionPromptProps {
-    request: PermissionRequest;
+    request: PermissionRequest | null;
 }
 
 function PermissionPrompt({ request }: PermissionPromptProps) {
+    if (!request) {
+        return null;
+    }
+    
     const { exit } = useApp();
     const [selection, setSelection] = useState<'allow' | 'deny' | null>(null);
     const { columns = 80 } = useTerminalSize();
@@ -604,7 +608,9 @@ export function REPL({
       coreEngineRef.current = processInput(
         initialPrompt,
         sessionId,
-        sessionManager
+        sessionManager,
+        permissionHandler,
+        abortController.signal
       );
       
       // Process events from the core engine
@@ -967,7 +973,9 @@ export function REPL({
       coreEngineRef.current = processInput(
           userInput,
           sessionId,
-          sessionManager
+          sessionManager,
+          permissionHandler,
+          abortController.signal
       );
 
       let nextToolResult: ToolResultBlockParam | undefined = undefined;

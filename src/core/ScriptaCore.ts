@@ -57,9 +57,10 @@ async function queryLlmService(
 // import { queryOpenAI } from '../services/claude'; // Or wherever it lives
 // Need Command type and hasCommand function (define/import later)
 // import { Command, hasCommand } from '../commands';
-// import { AbortController } from 'node-abort-controller';
+import { AbortController } from 'node-abort-controller';
 import { ToolUseBlock, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'; // Import ToolUseBlock and ToolResultBlockParam
 import { ISessionManager, SessionState } from './session/ISessionManager'; // Import session manager interface
+import { IPermissionHandler, PermissionHandlerContext } from './permissions/IPermissionHandler'; // Import permission handler interface
 import { createComponentLogger } from '../utils/log'; 
 import chalk from 'chalk';
 
@@ -138,6 +139,8 @@ function logMessageChain(messageType: string, messages: Message[]) {
  * @param userInput The input string from the user.
  * @param sessionId The unique identifier for the current session.
  * @param sessionManager The manager responsible for handling session state.
+ * @param permissionHandler The permission handler for managing permissions
+ * @param abortSignal Optional AbortSignal to cancel the operation
  * @param _initialToolResults Optional initial tool results for subsequent LLM calls
  * @yields {CoreEvent} Events representing LLM responses, errors, etc.
  */
@@ -145,6 +148,8 @@ export async function* processInput(
     userInput: string,
     sessionId: string,
     sessionManager: ISessionManager,
+    permissionHandler: IPermissionHandler,
+    abortSignal: AbortSignal,
     _initialToolResults?: ToolResultBlockParam[]
 ): AsyncGenerator<CoreEvent, void, ToolResultBlockParam | undefined> {
 
@@ -246,7 +251,6 @@ export async function* processInput(
         let normalizedMessages: (UserMessage | AssistantMessage)[] = [];
         let modelToUse: string | undefined = undefined;
         let assistantResponse: AssistantMessage | null = null;
-        const abortController = new AbortController();
 
         if (inputType === 'prompt' || inputType === 'shellCommand') {
             try {
@@ -313,7 +317,7 @@ export async function* processInput(
                     formattedSystemPromptParts,
                     config?.largeModelMaxTokens ?? 0,
                     enabledTools, 
-                    abortController.signal,
+                    abortSignal,
                     {
                         model: modelToUse, 
                         // provider: provider, // Assuming queryLlmService infers from model
@@ -388,7 +392,7 @@ export async function* processInput(
                     }
 
                      // Check for abort signal after potentially long tool execution
-                     if (abortController.signal.aborted) {
+                     if (abortSignal.aborted) {
                          conditionalLog("[ScriptaCore] Aborted after receiving tool result.");
                          // Optionally yield interrupt message
                          return;
@@ -424,7 +428,7 @@ export async function* processInput(
                             formattedSystemPromptParts, 
                             config?.largeModelMaxTokens ?? 0,
                             enabledTools, 
-                            abortController.signal, 
+                            abortSignal,
                             {
                                 model: modelToUse, 
                                 // provider: provider, // Assuming queryLlmService infers from model
@@ -488,7 +492,7 @@ export async function* processInput(
                                     }
         
                                     // Check for abort signal
-                                    if (abortController.signal.aborted) {
+                                    if (abortSignal.aborted) {
                                         conditionalLog("[ScriptaCore] Aborted after receiving tool result.");
                                         return;
                                     }
