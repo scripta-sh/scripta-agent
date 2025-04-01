@@ -80,7 +80,7 @@ export class CoreGrepTool extends BaseTool {
 
   async *call(
     { pattern, path, include }: GrepToolInput, 
-    { abortController }: ToolUseContext
+    { abortSignal }: ToolUseContext
   ) {
     const start = Date.now();
     const absolutePath = getAbsolutePath(path) || getCwd();
@@ -90,7 +90,7 @@ export class CoreGrepTool extends BaseTool {
       args.push('--glob', include);
     }
 
-    const results = await ripGrep(args, absolutePath, abortController.signal);
+    const results = await ripGrep(args, absolutePath, abortSignal);
 
     const stats = await Promise.all(results.map(_ => stat(_)));
     const matches = results

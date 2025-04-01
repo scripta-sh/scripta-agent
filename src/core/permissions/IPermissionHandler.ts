@@ -1,15 +1,20 @@
-import { Tool } from '../../Tool';
+import { Tool } from '../tools/interfaces/Tool';
 import { AssistantMessage } from '../agent';
+import { ISessionManager } from '../session/ISessionManager';
 
-// Define a simpler context for permission handling
-export type PermissionHandlerContext = {
-  abortController: AbortController;
+/**
+ * Context object passed to permission handler methods.
+ */
+export interface PermissionHandlerContext {
+  abortSignal: AbortSignal; // Use AbortSignal for cancellation
   options: {
     dangerouslySkipPermissions?: boolean;
-    // Add other relevant options if needed later
+    tools?: Tool[]; // Explicitly add tools here
+    [key: string]: any; // Keep index signature for flexibility
   };
-  // Add other context properties if needed
-};
+  sessionManager: ISessionManager;
+  sessionId: string;
+}
 
 /**
  * Permission request interface for UI interaction

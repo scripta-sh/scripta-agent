@@ -7,7 +7,7 @@ import {
   bashToolHasPermission,
 } from '../../permissions';
 import { ToolUseConfirm } from '../../components/permissions/PermissionRequest';
-import { AssistantMessage } from '../../query'; // Needed for ToolUseConfirm type
+import { AssistantMessage } from '../../core/agent';
 import { logEvent } from '../../services/statsig';
 import { REJECT_MESSAGE } from '../../utils/messages';
 import { getCommandSubcommandPrefix } from '../../utils/commands';
@@ -25,10 +25,15 @@ const logger = createComponentLogger('CliPermissionHandler');
 
 type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
 
-// Define the type for the state setter function
-type SetPermissionRequestFn = (
-    request: PermissionRequest | null
-) => void;
+// Define the type for the state setter function for the simple prompt
+// Re-define the type needed for the simple prompt state setter
+interface SimplePermissionRequest {
+    toolName: string;
+    toolInput: any;
+    onAllow: () => void;
+    onDeny: () => void;
+}
+type SetSimplePermissionRequestFn = (request: SimplePermissionRequest | null) => void;
 
 /**
  * CLI-specific implementation of IPermissionHandler.
@@ -36,11 +41,14 @@ type SetPermissionRequestFn = (
  */
 export class CliPermissionHandler implements IPermissionHandler {
   private setToolUseConfirm: SetState<ToolUseConfirm | null>;
-  private setPermissionRequest: SetPermissionRequestFn;
+  private setPermissionRequest: SetSimplePermissionRequestFn; // <-- Use explicit type
   // Track tools that have been granted session-wide permission (not just once)
   private sessionGrantedTools: Map<string, Set<string>> = new Map();
   
-  constructor(setToolUseConfirm: SetState<ToolUseConfirm | null>, setPermissionRequest: SetPermissionRequestFn) {
+  constructor(
+      setToolUseConfirm: SetState<ToolUseConfirm | null>, 
+      setPermissionRequest: SetSimplePermissionRequestFn // <-- Use explicit type
+  ) {
     this.setToolUseConfirm = setToolUseConfirm;
     this.setPermissionRequest = setPermissionRequest;
   }
@@ -48,30 +56,26 @@ export class CliPermissionHandler implements IPermissionHandler {
   // Generate a key for the session permission cache
   private getSessionPermissionKey(tool: Tool, input: any): string {
     try {
-      // For write tools, use the file path as part of the key
-      if (tool === FileWriteTool) {
+      // Check tool name for specific handling
+      if (tool.name === 'FileWrite') {
         return `${tool.name}:${input.file_path || ''}`;
       }
-      // For edit tools, use the file path as part of the key
-      if (tool === FileEditTool) {
+      if (tool.name === 'FileEdit') {
         return `${tool.name}:${input.file_path || ''}`;
       }
-      // For notebook edit tools, use the notebook path
-      if (tool === NotebookEditTool) {
+      if (tool.name === 'NotebookEdit') {
         return `${tool.name}:${input.notebook_path || ''}`;
       }
-      // For other tools, just use the tool name
       return tool.name;
     } catch (e) {
-      // If we can't generate a key, just use the tool name
       return tool.name;
     }
   }
   
   // Check if session-wide permission has been granted for this specific tool invocation
   private hasSessionPermission(tool: Tool, input: any): boolean {
-    // For file operations, we always want to require permission, so return false
-    if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
+    // Check tool name for specific handling
+    if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
       return false;
     }
     
@@ -114,7 +118,7 @@ export class CliPermissionHandler implements IPermissionHandler {
       logger.debug(`Found session permission for ${tool.name}`);
       
       // Make sure filesystem-level permission is also granted for file tools
-      if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
+      if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
         logger.debug(`Granting filesystem permission for ${tool.name}`);
         // Use the savePermission that's already imported at the top
         savePermission(tool, input, null);
@@ -159,14 +163,14 @@ export class CliPermissionHandler implements IPermissionHandler {
       uuid: randomUUID() // Add the required uuid property
     };
     
-    // Re-implementing the core logic from the original class using setToolUseConfirm
     return new Promise(async (resolve) => {
       const handleAbort = () => {
-        context.abortController.abort();
+        // context.abortController.abort(); // No longer have controller here
         resolve(false);
       };
 
-      if (context.abortController.signal.aborted) {
+      // Check the signal directly
+      if (context.abortSignal.aborted) {
         handleAbort();
         return;
       }
@@ -179,30 +183,26 @@ export class CliPermissionHandler implements IPermissionHandler {
         // commandPrefix logic might need adjustment or removal if not used
         const commandPrefix = null; 
 
-        // Set the simplified permission request for the CLI UI
+        // Set the permission request using the correct interface structure
         const userFacingName = tool.userFacingName ? tool.userFacingName(input) : tool.name;
         logger.debug(`Setting permission request for ${userFacingName}`);
         this.setPermissionRequest({
-          toolName: userFacingName,
+          toolName: userFacingName, 
           toolInput: input,
           onAllow: () => {
-            // Clean up UI state
             logger.debug(`Permission request allowed by user`);
             this.setPermissionRequest(null);
-            // Proceed with the allow flow
-            this.setToolUseConfirm(null);
-            // Save to the session cache as a one-time permission
-            if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
+            
+            // Save permission based on tool type
+            if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
               logger.debug(`Granting filesystem permission for current request: ${tool.name}`);
               savePermission(tool, input, null);
             }
             resolve(true);
           },
           onDeny: () => {
-            // Clean up UI state
             logger.debug(`Permission request denied by user`);
             this.setPermissionRequest(null);
-            this.setToolUseConfirm(null);
             handleAbort();
           }
         });
@@ -217,7 +217,9 @@ export class CliPermissionHandler implements IPermissionHandler {
           onAbort: () => {
             this.setToolUseConfirm(null);
             this.setPermissionRequest(null); // Also clean up permission request
-            handleAbort();
+            // Abort is handled by checking the signal elsewhere or if the promise rejects naturally
+            // We don't call handleAbort() here directly anymore unless needed by UI logic
+            resolve(false); // Resolve false on explicit UI abort
           },
           onAllow: async (type: 'once' | 'permanent') => {
             this.setToolUseConfirm(null);
@@ -230,7 +232,7 @@ export class CliPermissionHandler implements IPermissionHandler {
             }
             
             // Always save filesystem permission for the current request
-            if (tool === FileWriteTool || tool === FileEditTool || tool === NotebookEditTool) {
+            if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
               logger.debug(`Granting filesystem permission for current request: ${tool.name}`);
               savePermission(tool, input, null);
             }
@@ -240,7 +242,8 @@ export class CliPermissionHandler implements IPermissionHandler {
           onReject: () => {
             this.setToolUseConfirm(null);
             this.setPermissionRequest(null); // Also clean up permission request
-            handleAbort(); // Aborting is handled within handleAbort now
+            // handleAbort(); // Don't call abort here, just resolve false
+            resolve(false);
           },
         });
       } catch (error) {

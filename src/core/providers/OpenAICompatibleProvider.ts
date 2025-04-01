@@ -209,7 +209,7 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     const proxy = config.proxy ? new ProxyAgent(config.proxy) : undefined;
     
     try {
-      // Log API call
+      // Log API call (keep this one)
       logger.debug(`Calling ${this.name} API (${modelType}): ${baseURL}/chat/completions, model: ${requestOpts.model}`);
       
       // Make the API call

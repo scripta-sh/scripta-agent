@@ -49,9 +49,27 @@ export function convertAnthropicToOpenAI(
           }],
         });
       } else if (block.type === 'tool_result') {
+        // Extract the string content from the Anthropic block format
+        // OpenAI expects a plain string for tool role content.
+        let resultString = '';
+        if (Array.isArray(block.content) && block.content.length > 0 && block.content[0]?.type === 'text') {
+          resultString = block.content[0].text;
+        } else if (typeof block.content === 'string') {
+          // Handle cases where content might already be a string (less likely now, but safe)
+          resultString = block.content;
+        } else {
+          // Log a warning if the format is unexpected and attempt to stringify
+          logger.warn(`Unexpected tool_result content format for tool_use_id ${block.tool_use_id}:`, block.content);
+          try {
+            resultString = JSON.stringify(block.content);
+          } catch {
+            resultString = '[Error: Could not stringify tool result content]';
+          }
+        }
+
         toolResults[block.tool_use_id] = {
           role: 'tool',
-          content: block.content,
+          content: resultString, // Assign the extracted string
           tool_call_id: block.tool_use_id,
         };
       }

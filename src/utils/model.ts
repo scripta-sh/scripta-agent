@@ -27,7 +27,8 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
 // Function to get the actual small model from configuration
 export function getSmallModel(): string {
   const config = getGlobalConfig()
-  return config.smallModelName || 'claude-3-5-haiku-20241022'
+  // Fallback to the configured large model if smallModelName is not set
+  return config.smallModelName || config.largeModelName
 }
 
 // For backwards compatibility

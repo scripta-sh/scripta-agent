@@ -14,6 +14,7 @@ import { logError } from './log'
 import { memoize, sample } from 'lodash-es'
 import { promisify } from 'util'
 import { getIsGit } from './git'
+import { getSmallModel } from './model'
 
 const execPromise = promisify(exec)
 
@@ -58,6 +59,9 @@ async function getFrequentlyModifiedFiles(): Promise<string[]> {
       "You are an expert at analyzing git history. Given a list of files and their modification counts, return exactly five filenames that are frequently modified and represent core application logic (not auto-generated files, dependencies, or configuration). Make sure filenames are diverse, not all in the same folder, and are a mix of user and other users. Return only the filenames' basenames (without the path) separated by newlines with no explanation.",
     ];
 
+    // Get the configured small model name
+    const smallModelName = getSmallModel();
+
     // Call the provider service directly
     const response = await llmService.query(
       [userMessage],
@@ -66,7 +70,8 @@ async function getFrequentlyModifiedFiles(): Promise<string[]> {
       [],
       new AbortController().signal,
       {
-        model: 'claude-3-5-haiku-20241022', // Use a small, efficient model
+        // Use the configured small model name
+        model: smallModelName, 
       }
     );
 

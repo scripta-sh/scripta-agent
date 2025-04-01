@@ -2,6 +2,7 @@ import { safeParseJSON } from './json'
 import { logError } from './log'
 import { llmService } from '../core/providers'
 import crypto from 'crypto'
+import { getSmallModel } from './model'
 
 export function setTerminalTitle(title: string): void {
   if (process.platform === 'win32') {
@@ -18,15 +19,17 @@ export async function updateTerminalTitle(message: string): Promise<void> {
     ];
     
     const userMessage = {
-      type: 'user',
+      type: 'user' as const,
       message: {
         content: message,
-        role: 'user',
+        role: 'user' as const,
         id: Date.now().toString(),
-        type: 'message'
+        type: 'message' as const
       },
       uuid: crypto.randomUUID()
     };
+    
+    const smallModelName = getSmallModel();
     
     const result = await llmService.query(
       [userMessage], 
@@ -35,7 +38,7 @@ export async function updateTerminalTitle(message: string): Promise<void> {
       [], 
       new AbortController().signal,
       {
-        model: 'claude-3-5-haiku-20241022', // Use a small, efficient model
+        model: smallModelName,
       }
     );
 

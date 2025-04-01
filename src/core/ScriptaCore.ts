@@ -2,12 +2,9 @@
 
 // Define required types from other modules
 import { Message, UserMessage, AssistantMessage } from './agent'; // Import from local agent directory (TypeScript will handle the extension)
-import { createUserMessage, normalizeMessagesForAPI, NormalizedMessage, CANCEL_MESSAGE } from '../utils/messages';
 import { Tool } from './tools/interfaces/Tool'; // Import Tool from core
 import { getEnabledTools, getAllTools } from './tools/registry'; // Import registry functions
-import { getContext } from '../context'; // For generating context string
 import { getSystemPrompt } from './constants/prompts';
-import { getSlowAndCapableModel } from '../utils/model';
 import { llmService } from './providers'; // Import the provider service
 // Define formatSystemPromptWithContext here instead of importing from claude.ts
 function formatSystemPromptWithContext(
@@ -62,81 +59,20 @@ import { ToolUseBlock, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/
 import { ISessionManager, SessionState } from './session/ISessionManager'; // Import session manager interface
 import { IPermissionHandler, PermissionHandlerContext } from './permissions/IPermissionHandler'; // Import permission handler interface
 import { createComponentLogger } from '../utils/log'; 
-import chalk from 'chalk';
+import { CoreEvent } from './agent/types'; // <-- IMPORT CoreEvent
+import { randomUUID } from 'crypto'; // Ensure randomUUID is imported or available
 
 // Create a logger for this component
 const logger = createComponentLogger('ScriptaCore');
 
-// Initial CoreEvent definition
-export type CoreEvent =
-    | { type: 'assistantResponse'; text: string }
-    | { type: 'error'; message: string; error?: Error }
-    | { type: 'toolRequest'; toolName: string; toolInput: any; toolUseId: string };
-    // Add other event types later: toolRequest, progress, etc.
-
-// Helper for conditional logging
-const conditionalLog = (message: string, data?: any, verbose = false) => {
-    if (verbose) {
-        if (data) {
-            logger.debug(message, data);
-        } else {
-            logger.debug(message);
-        }
-    }
-};
-
-// Add a helper function for formatting final response in gray color
-function logFinalResponse(text: string) {
-    if (process.stdout?.isTTY) {
-        // In CLI mode, format the entire message in gray
-        const preview = text.substring(0, 50) + (text.length > 50 ? '...' : '');
-        console.debug(chalk.gray(`[ScriptaCore] Yielding final response: ${preview}`));
-    } else {
-        // In non-CLI environment, use standard logging
-        logger.debug(`Yielding final response: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`);
-    }
-}
-
-// Add a helper for consistent message chain logging
-function logMessageChain(messageType: string, messages: Message[]) {
-    if (!process.stdout?.isTTY) {
-        // In non-CLI environments, use the logger
-        logger.debug(`${messageType} ${messages.length} messages:`, 
-            messages.map(m => {
-                if (m.type === 'progress') {
-                    return `PROGRESS: tool-progress`;
-                } else {
-                    return `${m.type.toUpperCase()}: ${typeof m.message.content === 'string' 
-                        ? m.message.content.substring(0, 30) + '...' 
-                        : Array.isArray(m.message.content) && m.message.content[0]?.type === 'text'
-                          ? (m.message.content[0] as any).text.substring(0, 30) + '...'
-                          : 'non-text content'}`;
-                }
-            })
-        );
-        return;
-    }
-    
-    // In CLI environment, use chalk directly
-    const formattedMessages = messages.map(m => {
-        if (m.type === 'progress') {
-            return chalk.gray(`PROGRESS: tool-progress`);
-        } else {
-            return chalk.gray(`${m.type.toUpperCase()}: ${typeof m.message.content === 'string' 
-                ? m.message.content.substring(0, 30) + '...' 
-                : Array.isArray(m.message.content) && m.message.content[0]?.type === 'text'
-                  ? (m.message.content[0] as any).text.substring(0, 30) + '...'
-                  : 'non-text content'}`);
-        }
-    });
-    
-    console.debug(chalk.gray(`[ScriptaCore] ${messageType} ${messages.length} messages:`), formattedMessages);
-}
+// Helper to get Tool instance (assuming getToolOrThrow exists and is moved/available)
+import { getToolOrThrow } from './tools/registry'; 
+import { AbortError } from '../utils/errors'; // Assuming AbortError is available or moved
 
 /**
  * Processes user input and yields core events representing the conversation flow.
  *
- * @param userInput The input string from the user.
+ * @param userInput The user's input for this session
  * @param sessionId The unique identifier for the current session.
  * @param sessionManager The manager responsible for handling session state.
  * @param permissionHandler The permission handler for managing permissions
@@ -153,439 +89,310 @@ export async function* processInput(
     _initialToolResults?: ToolResultBlockParam[]
 ): AsyncGenerator<CoreEvent, void, ToolResultBlockParam | undefined> {
 
+    try { // Wrap entire function in try...finally for final progress update
     // Fetch initial state using the session manager
     const initialState = await sessionManager.getSessionState(sessionId);
     // Use a mutable copy for processing within this turn
-    const currentMessagesForTurn: Message[] = [...initialState.messages];
+        let currentMessagesForTurn: Message[] = [...initialState.messages];
 
-    logger.debug(`Starting with ${currentMessagesForTurn.length} messages from previous conversation context`);
-    
-    // Log the existing context (first few messages)
-    if (currentMessagesForTurn.length > 0) {
-        const contextPreview = currentMessagesForTurn.slice(0, Math.min(3, currentMessagesForTurn.length));
-        conditionalLog("[ScriptaCore] Conversation context:", contextPreview.map(m => {
-            if (m.type === 'user') {
-                return `USER: ${typeof m.message.content === 'string' ? m.message.content.substring(0, 30) + '...' : 'structured content'}`;
-            } else if (m.type === 'assistant') {
-                return `ASSISTANT: ${m.message.content[0]?.type === 'text' ? (m.message.content[0] as any).text.substring(0, 30) + '...' : 'structured content'}`;
-            } else {
-                return `OTHER: ${m.type}`;
-            }
-        }));
-    }
-
-    try {
-        let userMessage: Message | null = null;
-        let inputType: 'prompt' | 'slashCommand' | 'shellCommand' = 'prompt';
-
-        // Destructure CWD and Config from initialState *before* the try block
-        const { currentWorkingDirectory, config } = initialState;
+        logger.debug(`[ScriptaCore] Starting processing for session ${sessionId} with ${currentMessagesForTurn.length} initial messages.`);
 
         // Validate required state properties
+        const { currentWorkingDirectory, config, tools: enabledTools } = initialState;
         if (!currentWorkingDirectory) {
-             throw new Error("Current working directory is missing from session state.");
+            yield { type: 'ErrorOccurred', message: "Current working directory is missing from session state." };
+            return;
         }
         if (!config) {
-             throw new Error("Configuration is missing from session state.");
+            yield { type: 'ErrorOccurred', message: "Configuration is missing from session state." };
+            return;
         }
-
-        // --- Input Processing Logic --- 
-        // Note: 'bash' mode distinction is removed for now, relying on '!' prefix
-        if (userInput.startsWith('!')) {
-            inputType = 'shellCommand';
-            // Create user message representing the shell command input
-            userMessage = createUserMessage(`<bash-input>${userInput.slice(1)}</bash-input>`);
-            // TODO: Later, this might trigger BashTool directly or format differently for LLM
-            conditionalLog(`[ScriptaCore] Detected Shell Command: ${userInput.slice(1)}`); // Placeholder Log
-        } else if (userInput.startsWith('/')) {
-            inputType = 'slashCommand';
-            const words = userInput.slice(1).split(' ');
-            let commandName = words[0];
-            // Handle potential "(MCP)" suffix if needed later
-            // if (words.length > 1 && words[1] === '(MCP)') {
-            //   commandName = commandName + ' (MCP)';
-            // }
-
-            if (!commandName) {
-                // Yield an error event for empty command
-                yield { type: 'error', message: 'Command name missing. Commands are in the form `/command [args]`.' };
-                return; // Stop processing
-            }
-
-            // TODO: Check if command exists using hasCommand(commandName, currentState.commands)
-            // const commandExists = hasCommand(commandName, currentState.commands);
-            const commandExists = false; // Placeholder - Assume command doesn't exist for now
-
-            if (!commandExists) {
-                 yield { type: 'error', message: `Unknown command: ${commandName}` };
-                 return; // Stop processing
-            } else {
-                // Command exists - create user message for context
-                userMessage = createUserMessage(userInput);
-                // TODO: Execute command logic (or yield commandRequest event)
-                 conditionalLog(`[ScriptaCore] Detected Slash Command: ${commandName}`); // Placeholder Log
-            }
-
-        } else {
-            // Default: Treat as a prompt
-            inputType = 'prompt';
-            // Create standard user message
-            userMessage = createUserMessage(userInput);
-             conditionalLog(`[ScriptaCore] Detected Prompt`); // Placeholder Log
-        }
-        // --- End: Input Processing Logic ---
-
-        // Add the processed user message to the session state (local copy)
-        if (userMessage) {
-            // await sessionManager.addMessage(sessionId, userMessage); // Incorrect
-            currentMessagesForTurn.push(userMessage); // Add to local copy
-        } else {
-             // Handle cases where no user message was created (e.g., invalid command)
-             conditionalLog("[ScriptaCore] No user message created for input.");
-             yield { type: 'error', message: 'Failed to process user input.'};
+        if (!enabledTools) {
+             yield { type: 'ErrorOccurred', message: "Enabled tools missing from session state." };
              return;
+        }
+        
+        // Expect the latest message to be the user's input for this turn
+        const lastMessage = currentMessagesForTurn[currentMessagesForTurn.length - 1];
+        if (!lastMessage || lastMessage.type !== 'user') {
+             logger.error("[ScriptaCore] Last message in session is not a user message.", { lastMessage });
+             yield { type: 'ErrorOccurred', message: "Processing error: Expected user input as the last message." };
+             return;
+        }
+        
+        // Log context (use simple logger)
+        if (currentMessagesForTurn.length > 1) { // Log context excluding the last user message
+            const contextPreview = currentMessagesForTurn.slice(0, -1).slice(-3); // Log last 3 context messages
+             logger.debug("[ScriptaCore] Conversation context preview:", contextPreview.map(m => `${m.type.toUpperCase()}: ...`));
         }
 
         // --- Start: Prepare LLM Call Data ---
         let formattedSystemPromptParts: string[] = [];
         let normalizedMessages: (UserMessage | AssistantMessage)[] = [];
-        let modelToUse: string | undefined = undefined;
+        let modelToUse = config.smallModelName // <-- Use smallModelName instead of fastModelId
         let assistantResponse: AssistantMessage | null = null;
+        
+        // Get system prompt based on config
+        formattedSystemPromptParts = await getSystemPrompt(); // <-- Remove config?.provider argument
+        // TODO: Re-introduce context formatting based on SessionState if needed
+        // formattedSystemPromptParts = formatSystemPromptWithContext(formattedSystemPromptParts, {}); 
 
-        if (inputType === 'prompt' || inputType === 'shellCommand') {
-            try {
-                // 1. Get System Prompt parts and Context
-                // CWD and Config are already destructured above
+        // --- Initial LLM Call --- 
+        normalizedMessages = currentMessagesForTurn as (UserMessage | AssistantMessage)[]; // Assuming type compatibility for now
+        // TODO: Add proper normalization logic if needed (e.g., from core utils)
 
-                const [baseSystemPromptParts, contextData] = await Promise.all([
-                    getSystemPrompt(), // Assuming this doesn't need session state
-                    // Call getContext with cwd and config from session state
-                    getContext(currentWorkingDirectory, config),
-                ]);
-
-                // 2. Format full system prompt (store string[])
-                formattedSystemPromptParts = formatSystemPromptWithContext(baseSystemPromptParts, contextData);
-
-                // 3. Normalize messages for the API - Use local copy
-                // const currentMessages = await sessionManager.getMessages(sessionId); // Don't fetch again
-                normalizedMessages = normalizeMessagesForAPI(currentMessagesForTurn);
-
-                // Log the normalized messages for debugging
-                conditionalLog("[ScriptaCore] Normalized messages for API:", 
-                  normalizedMessages.map(m => {
-                    return {
-                      role: m.message.role,
-                      content_type: typeof m.message.content === 'string' 
-                        ? 'string' 
-                        : Array.isArray(m.message.content) 
-                          ? m.message.content.map(c => c.type).join(', ') 
-                          : 'unknown',
-                      content_preview: typeof m.message.content === 'string'
-                        ? m.message.content.substring(0, 50) + (m.message.content.length > 50 ? '...' : '')
-                        : Array.isArray(m.message.content) && m.message.content[0]?.type === 'text'
-                          ? (m.message.content[0] as any).text.substring(0, 50) + ((m.message.content[0] as any).text.length > 50 ? '...' : '')
-                          : 'non-text content',
-                      uuid: m.uuid,
-                      message_id: m.message.id
-                    }
-                  })
-                );
-
-                // 4. Determine model - Use largeModelName from config retrieved from session state
-                modelToUse = config?.largeModelName ?? await getSlowAndCapableModel();
-
-            } catch (e) {
-                 conditionalLog("[ScriptaCore] Error preparing LLM call data:", e);
-                 yield { type: 'error', message: 'Error preparing data for LLM call.', error: e instanceof Error ? e : undefined };
-                 return;
-            }
-            
-            conditionalLog(`[ScriptaCore] Calling LLM: ${normalizedMessages.length} messages, model: ${modelToUse}`);
-
-            // --- Start: Call LLM Service (Moved from query.ts) ---
-            try {
-                // Determine provider and model from config retrieved from session state
-                const provider = config?.primaryProvider ?? 'anthropic';
-                // modelToUse is already determined above the try block
-
-                // Get enabled tools from the registry
-                const enabledTools = await getEnabledTools();
-                
-                // Call queryLlmService directly with tools from registry
+        yield { type: 'ProgressUpdate', status: 'thinking', message: 'Querying LLM...' };
+        logger.debug(`[ScriptaCore] Making initial LLM call with ${normalizedMessages.length} messages.`);
+        
+        try {
                 assistantResponse = await queryLlmService(
                     normalizedMessages,
                     formattedSystemPromptParts,
-                    config?.largeModelMaxTokens ?? 0,
+                 config?.largeModelMaxTokens ?? 4096, // Use config value or default
                     enabledTools, 
-                    abortSignal,
+                 abortSignal,
                     {
                         model: modelToUse, 
-                        // provider: provider, // Assuming queryLlmService infers from model
-                        prependCLISysprompt: true, 
-                    },
-                );
+                     dangerouslySkipPermissions: false, // <-- Default to false, remove config access
+                     // Pass other config options if needed by llmService
+                 }
+             );
+             logger.debug("[ScriptaCore] Received initial LLM response.");
+             // Yield AssistantMessageStart event
+             yield { type: 'AssistantMessageStart', message: assistantResponse };
+        } catch (error: any) {
+             logger.error("[ScriptaCore] Error during initial LLM call:", error);
+             yield { type: 'ErrorOccurred', message: `LLM API Error: ${error.message}`, error };
+             return; // Stop processing on initial LLM error
+        }
 
-            } catch (e) {
-                conditionalLog("[ScriptaCore] Error calling LLM service:", e);
-                yield { type: 'error', message: 'Error communicating with LLM.', error: e instanceof Error ? e : undefined };
-                return;
-            }
-            // --- End: Call LLM Service ---
+        // --- Tool Handling Loop --- 
+        let toolResults: ToolResultBlockParam[] = [];
+        let needsAnotherLlmCall = false;
+        let assistantMessageForToolTurn = assistantResponse; // Use the response containing the tools
+        
+        while (assistantMessageForToolTurn && assistantMessageForToolTurn.message.content.some(c => c.type === 'tool_use')) {
+            needsAnotherLlmCall = true; // We'll definitely make a follow-up call
+            logger.debug(`[ScriptaCore] Processing tool requests from message ID: ${assistantMessageForToolTurn.message.id}`);
+            
+            // Add the assistant message containing tool_use blocks to the turn history
+            currentMessagesForTurn.push(assistantMessageForToolTurn);
 
-        } 
-        // --- End: Prepare LLM Call Data & Call Service ---
+            const toolUseBlocks = assistantMessageForToolTurn.message.content.filter(
+                (c): c is ToolUseBlock => c.type === 'tool_use'
+            );
 
-        // 4. Yield Events / Handle Tool Results
-        if (assistantResponse) {
-            // await sessionManager.addMessage(sessionId, assistantResponse); // Incorrect
-            currentMessagesForTurn.push(assistantResponse); // Add to local copy
-            const toolUseBlocks = assistantResponse.message.content.filter(
-                _ => _.type === 'tool_use',
-            ) as ToolUseBlock[]
+            const currentToolResultsForRound: ToolResultBlockParam[] = [];
+            
+            // Process tool calls (can be parallel later, sequential for now)
+            for (const toolUse of toolUseBlocks) {
+                let toolResultForBlock: ToolResultBlockParam | undefined = undefined;
+                let permissionGranted = false;
 
-            // Log detected tool calls for debugging
-            logger.debug(`Detected ${toolUseBlocks.length} tool calls in assistant response:`);
-            if (toolUseBlocks.length > 0) {
-                toolUseBlocks.forEach(block => {
-                    logger.debug(`Tool call detected: ${block.name} (ID: ${block.id})`);
-                });
-            }
+                try {
+                    const tool = getToolOrThrow(toolUse.name);
+                    logger.debug(`[ScriptaCore] Found tool: ${tool.name} for tool_use ID: ${toolUse.id}`);
 
-            if (toolUseBlocks.length > 0) {
-                const toolResults: ToolResultBlockParam[] = [];
-                for (const block of toolUseBlocks) {
-                    // Yield the request and wait for the result from the caller via .next()
-                    const toolResult: ToolResultBlockParam | undefined = yield {
-                        type: 'toolRequest',
-                        toolName: block.name,
-                        toolInput: block.input,
-                        toolUseId: block.id,
+                    // Prepare permission context
+                    const permissionContext: PermissionHandlerContext = {
+                        abortSignal: abortSignal,
+                        options: { dangerouslySkipPermissions: false /* Read from config/context if needed */ },
+                        sessionManager: sessionManager,
+                        sessionId: sessionId
                     };
+                    // TODO: Link permissionContext.abortController to the main abortSignal?
 
-                    if (toolResult) {
-                        conditionalLog(`[ScriptaCore] Received result for ${block.id}:`, {
-                            type: toolResult.type,
-                            tool_use_id: toolResult.tool_use_id,
-                            is_error: toolResult.is_error,
-                            contentSize: typeof toolResult.content === 'string' ?
-                                `${Math.min(toolResult.content.length, 30)} chars` +
-                                (toolResult.content.length > 30 ? '...' : '') : 'object'
-                        });
-                        
-                        // If the tool result indicates an error due to permission denial, exit without making more API calls
-                        // For other errors (technical failures), we should still pass the error back to the LLM
-                        if (toolResult.is_error && 
-                            (toolResult.content.includes('Permission denied') || 
-                             toolResult.content === CANCEL_MESSAGE)) {
-                            conditionalLog(`[ScriptaCore] Tool permission was denied for ${block.id}. Skipping further LLM calls.`);
-                            // Just exit without sending a message - let the UI show just the rejection
-                            return; // Exit the generator entirely
+                    // 1. Check permission
+                    logger.debug(`[ScriptaCore] Checking permission for ${tool.name} (ID: ${toolUse.id})`);
+                    permissionGranted = await permissionHandler.checkPermission(tool, toolUse.input, permissionContext);
+                    logger.debug(`[ScriptaCore] Pre-existing permission for ${tool.name}: ${permissionGranted}`);
+
+                    // 2. Request permission if not already granted
+                    if (!permissionGranted) {
+                        logger.debug(`[ScriptaCore] Requesting permission for ${tool.name} (ID: ${toolUse.id})`);
+                        try {
+                            permissionGranted = await permissionHandler.requestPermission(
+                                tool,
+                                toolUse.input,
+                                permissionContext,
+                                assistantMessageForToolTurn // Pass the assistant message containing the request
+                            );
+                            logger.debug(`[ScriptaCore] Permission request result for ${tool.name}: ${permissionGranted}`);
+                        } catch (err) {
+                            logger.error(`[ScriptaCore] Error during permission request for ${tool.name}:`, err);
+                            permissionGranted = false;
+                            // Handle potential abort during permission request
+                            if (err instanceof AbortError || abortSignal.aborted) {
+                                yield { type: 'ErrorOccurred', message: 'Operation cancelled during permission request.', toolUseId: toolUse.id };
+                                return; // Stop all processing if aborted during permissions
+                            }
                         }
-                        
-                        toolResults.push(toolResult);
-                    } else {
-                        // Handle case where caller didn't provide a result (e.g., user cancel)
-                        conditionalLog(`[ScriptaCore] No result provided for ${block.id}. Aborting further processing.`);
-                         yield { type: 'error', message: `Tool execution aborted or failed for ${block.id}` };
-                        // Potentially yield a synthetic message like INTERRUPT_MESSAGE_FOR_TOOL_USE
-                        return; // Stop the core engine's turn
                     }
 
-                     // Check for abort signal after potentially long tool execution
-                     if (abortSignal.aborted) {
-                         conditionalLog("[ScriptaCore] Aborted after receiving tool result.");
-                         // Optionally yield interrupt message
+                    // Check for main abort signal
+                    if (abortSignal.aborted) {
+                         logger.debug("[ScriptaCore] Aborted before tool execution.");
+                         yield { type: 'ErrorOccurred', message: 'Operation cancelled.', toolUseId: toolUse.id };
                          return;
                      }
-                }
 
-                // --- Start: Second LLM Call Logic ---
-                try {
-                    // Implement a loop for handling multiple rounds of tool use
-                    let continueLlmCalls = true;
-                    let currentToolResults = toolResults;
-                    
-                    while (continueLlmCalls) {
-                    // 1. Create the tool result message (User role as per Anthropic spec)
-                        const toolResultMessage = createUserMessage(currentToolResults);
-                    currentMessagesForTurn.push(toolResultMessage); // Add to local copy
-
-                    // 2. Normalize messages again - Use local copy
-                        normalizedMessages = normalizeMessagesForAPI(currentMessagesForTurn);
-        
-                    // 3. Call LLM service again
-                        // Get provider and model from config (modelToUse already available from initial call)
-                        const provider = config?.primaryProvider ?? 'anthropic'; 
-                        let nextAssistantResponse: AssistantMessage | null = null;
-
-                        // Get enabled tools from the registry (using the same tools as before)
-                        // We could cache this but for consistency let's call it again
-                        const enabledTools = await getEnabledTools();
+                    // 3. Handle based on permission result
+                    if (permissionGranted) {
+                        logger.debug(`[ScriptaCore] Permission granted for ${tool.name}. Yielding ToolRequested.`);
+                        yield { type: 'ProgressUpdate', status: 'tool_executing', toolUseId: toolUse.id };
                         
-                        // Call queryLlmService directly with tools from registry
-                        nextAssistantResponse = await queryLlmService(
-                            normalizedMessages,
-                            formattedSystemPromptParts, 
-                            config?.largeModelMaxTokens ?? 0,
-                            enabledTools, 
-                            abortSignal,
-                            {
-                                model: modelToUse, 
-                                // provider: provider, // Assuming queryLlmService infers from model
-                                prependCLISysprompt: true,
-                            },
-                        );
-
-                        // 5. Process the response
-                        if (nextAssistantResponse) {
-                            // await sessionManager.addMessage(sessionId, nextAssistantResponse); // Incorrect
-                            currentMessagesForTurn.push(nextAssistantResponse); // Add to local copy
-
-                            // Check if this response contains tool calls
-                        const subsequentToolUseBlocks = nextAssistantResponse.message.content.filter(
-                            block => block.type === 'tool_use'
-                        ) as ToolUseBlock[];
-
-                        if (subsequentToolUseBlocks.length > 0) {
-                                // Handle the next round of tool calls
-                                conditionalLog(`[ScriptaCore] Found ${subsequentToolUseBlocks.length} more tool calls, continuing the loop`);
-                                
-                                // Reset tool results for the next iteration
-                                currentToolResults = [];
-                                
-                                // Process each tool call
-                                for (const block of subsequentToolUseBlocks) {
-                                    // Yield the request and wait for the result
-                                    const toolResult: ToolResultBlockParam | undefined = yield {
-                                        type: 'toolRequest',
-                                        toolName: block.name,
-                                        toolInput: block.input,
-                                        toolUseId: block.id,
-                                    };
-        
-                                    if (toolResult) {
-                                        conditionalLog(`[ScriptaCore] Received result for ${block.id}:`, {
-                                            type: toolResult.type,
-                                            tool_use_id: toolResult.tool_use_id,
-                                            is_error: toolResult.is_error,
-                                            contentSize: typeof toolResult.content === 'string' ?
-                                                `${Math.min(toolResult.content.length, 30)} chars` +
-                                                (toolResult.content.length > 30 ? '...' : '') : 'object'
-                                        });
-                                        
-                                        // If the tool result indicates an error due to permission denial, exit without making more API calls
-                                        // For other errors (technical failures), we should still pass the error back to the LLM
-                                        if (toolResult.is_error && 
-                                            (toolResult.content.includes('Permission denied') || 
-                                             toolResult.content === CANCEL_MESSAGE)) {
-                                            conditionalLog(`[ScriptaCore] Tool permission was denied for ${block.id}. Skipping further LLM calls.`);
-                                            // Just exit without sending a message - let the UI show just the rejection
-                                            return; // Exit the generator entirely
-                                        }
-                                        
-                                        currentToolResults.push(toolResult);
-                                    } else {
-                                        // Handle case where caller didn't provide a result
-                                        conditionalLog(`[ScriptaCore] No result provided for ${block.id}. Aborting further processing.`);
-                                        yield { type: 'error', message: `Tool execution aborted or failed for ${block.id}` };
+                        // Yield request and wait for result from driving layer
+                        const resultFromYield: ToolResultBlockParam | undefined = yield {
+                            type: 'ToolRequested',
+                            toolUseId: toolUse.id,
+                            toolName: toolUse.name,
+                            toolInput: toolUse.input
+                        };
+                        
+                        logger.debug(`[ScriptaCore] Resumed after yield for ${toolUse.id}. Result received: ${!!resultFromYield}`);
+                        
+                        // Check abort again after potentially long tool execution
+                        if (abortSignal.aborted) {
+                            logger.debug("[ScriptaCore] Aborted after tool execution yield.");
+                            yield { type: 'ErrorOccurred', message: 'Operation cancelled.', toolUseId: toolUse.id };
                                         return;
                                     }
         
-                                    // Check for abort signal
-                                    if (abortSignal.aborted) {
-                                        conditionalLog("[ScriptaCore] Aborted after receiving tool result.");
-                                        return;
-                                    }
-                                }
-                                
-                                // Continue to the next iteration of the while loop
-                                continueLlmCalls = true;
+                        if (resultFromYield) {
+                            toolResultForBlock = resultFromYield;
                         } else {
-                                // No further tool use, DO NOT yield here - let the final yield handle it
-                            const textContent = nextAssistantResponse.message.content.filter(
-                                block => block.type === 'text'
-                            ).map(block => (block as any).text).join('');
-                            
-                            // Exit the loop
-                            continueLlmCalls = false;
+                            // Driving layer didn't send a result (e.g., internal error, cancellation)
+                            logger.warn(`[ScriptaCore] No result received from yield for tool ${toolUse.name} (ID: ${toolUse.id}). Treating as error.`);
+                            toolResultForBlock = {
+                                type: 'tool_result',
+                                tool_use_id: toolUse.id,
+                                is_error: true,
+                                content: 'Tool execution failed or was cancelled by the environment.'
+                            };
                         }
                     } else {
-                         yield { type: 'error', message: 'LLM did not return a response after tool execution.' };
-                            continueLlmCalls = false;
-                        }
+                        // Permission denied by handler
+                        logger.warn(`[ScriptaCore] Permission denied for tool ${toolUse.name} (ID: ${toolUse.id}).`);
+                        yield { type: 'ErrorOccurred', message: 'Permission denied by user.', toolUseId: toolUse.id };
+                        toolResultForBlock = {
+                            type: 'tool_result',
+                            tool_use_id: toolUse.id,
+                            is_error: true,
+                            content: 'Permission denied.'
+                        };
                     }
-                } catch (e) {
-                    conditionalLog("[ScriptaCore] Error during LLM call loop:", e);
-                    yield { type: 'error', message: 'Error during LLM call after tool execution.', error: e instanceof Error ? e : undefined };
-                    return;
+
+                } catch (error: any) {
+                    // Catch errors during tool finding, permission checks etc.
+                    logger.error(`[ScriptaCore] Error processing tool block ${toolUse.id} (${toolUse.name}):`, error);
+                    yield { type: 'ErrorOccurred', message: `Error processing tool ${toolUse.name}: ${error.message}`, error, toolUseId: toolUse.id };
+                    toolResultForBlock = {
+                        type: 'tool_result',
+                        tool_use_id: toolUse.id,
+                        is_error: true,
+                        content: `Internal error processing tool: ${error.message}`
+                    };
                 }
-                // --- End: LLM Call Loop Logic ---
-
-            } else {
-                // No tool use - DO NOT yield here, let the final yield handle it
-                const textContent = assistantResponse.message.content.filter(
-                     block => block.type === 'text'
-                ).map(block => (block as any).text).join('');
-            }
-        } else if (inputType === 'slashCommand') {
-             // Simulate command execution result 
-             yield { type: 'assistantResponse', text: `[Core Executed Slash Command]: ${userInput}` };
-        } else if (inputType === 'prompt') {
-             // No assistant response, but it was a prompt (maybe LLM call failed before response?)
-             // Yield text from user message as a fallback or handle error appropriately?
-             // For now, do nothing extra if assistantResponse is null after prompt
-        }
-
-        // Final assistant text response (either initial or after tool use)
-        // Track if we've yielded a response already
-        const hasYieldedFinalResponse = userInput.startsWith('/') || // We already yielded for slash commands
-                                       (inputType === 'prompt' && !assistantResponse); // We haven't yielded anything for normal prompts with null responses
-
-        if (!hasYieldedFinalResponse) {
-            const finalResponse = currentMessagesForTurn[currentMessagesForTurn.length - 1] as AssistantMessage | undefined;
-            if (finalResponse?.message?.content) {
-                const textContent = finalResponse.message.content
-                    .filter(block => block.type === 'text')
-                    .map(block => (block as any).text)
-                    .join('');
-                if (textContent) {
-                    logFinalResponse(textContent);
-                    yield { type: 'assistantResponse', text: textContent };
+                
+                // Add the result (or error block) for this tool to the round's results
+                if (toolResultForBlock) {
+                     currentToolResultsForRound.push(toolResultForBlock);
+                     // Yield confirmation that the result was processed by the core
+                     yield { type: 'ToolResultYielded', toolUseId: toolUse.id, result: toolResultForBlock };
                 }
+            } // End loop over toolUseBlocks for this round
+
+            // Add all results for this round to the message history for the next LLM call
+            currentToolResultsForRound.forEach(resultBlock => {
+                // Create a User message containing the tool_result block
+                // This aligns with how the converter expects to find tool results.
+                const toolResultUserMessage: UserMessage = {
+                    type: 'user', // Represent tool result submission as user input
+                    uuid: randomUUID(),
+                    message: {
+                        role: 'user',
+                        content: [resultBlock] // Embed the ToolResultBlockParam here
+                    }
+                };
+                currentMessagesForTurn.push(toolResultUserMessage);
+                logger.debug(`[ScriptaCore] Added ToolResultBlock for ${resultBlock.tool_use_id} wrapped in a user message.`);
+            });
+            
+            // Update session state *incrementally* after processing tool results for the round
+            // This allows recovery if a later step fails
+            logger.debug(`[ScriptaCore] Saving intermediate session state after tool round.`);
+            await sessionManager.setMessages(sessionId, [...currentMessagesForTurn]); // Save copy
+
+            // Prepare and make the next LLM call
+            normalizedMessages = currentMessagesForTurn as (UserMessage | AssistantMessage)[];
+            yield { type: 'ProgressUpdate', status: 'thinking', message: 'Querying LLM with tool results...' };
+            logger.debug(`[ScriptaCore] Making next LLM call with ${normalizedMessages.length} messages.`);
+
+            try {
+                 assistantResponse = await queryLlmService(
+                     normalizedMessages,
+                     formattedSystemPromptParts,
+                     config?.largeModelMaxTokens ?? 4096,
+                     enabledTools,
+                     abortSignal,
+                     {
+                         model: modelToUse,
+                         dangerouslySkipPermissions: false, // <-- Default to false, remove config access
+                     }
+                 );
+                 logger.debug("[ScriptaCore] Received next LLM response.");
+                 yield { type: 'AssistantMessageStart', message: assistantResponse };
+                 assistantMessageForToolTurn = assistantResponse; // Prepare for potential next loop iteration
+            } catch (error: any) {
+                 logger.error("[ScriptaCore] Error during next LLM call:", error);
+                 assistantMessageForToolTurn = null; // Stop loop on error
+                 return;
             }
-        }
+            
+        } // End while loop for tool rounds
+        
+        // --- Yield Final Assistant Response --- 
+        const finalAssistantMessage = assistantMessageForToolTurn; // The last response received (either initial or after tools)
+        
+        if (finalAssistantMessage) {
+            // Ensure the final assistant message is in the turn history if it wasn't a tool-using one
+            if (!currentMessagesForTurn.find(m => m.uuid === finalAssistantMessage.uuid)) {
+                 currentMessagesForTurn.push(finalAssistantMessage);
+            }
 
-    } finally {
-        // Ensure the final message list is saved back
-        await sessionManager.setMessages(sessionId, currentMessagesForTurn);
-        logger.debug(`Saved ${currentMessagesForTurn.length} messages for session ${sessionId}. Message chain continuity preserved.`);
-        
-        // Print the first few and last few messages to help with debugging
-        const firstThree = currentMessagesForTurn.slice(0, 3);
-        const lastThree = currentMessagesForTurn.slice(-3);
-        
-        logMessageChain("First", firstThree);
-        logMessageChain("Last", lastThree);
-        
-        // Also print the previous conversations to inspect contextual information
-        const savedMessages = await sessionManager.getMessages(sessionId);
-        logger.debug(`Session manager returned ${savedMessages.length} messages after saving.`);
-
-        // Log the message chain for debugging
-        if (conditionalLog) {
-            conditionalLog(`[ScriptaCore] Message chain:`, currentMessagesForTurn.map(m => {
-                if (m.type === 'user') {
-                    return `USER: ${typeof m.message.content === 'string' ? 
-                        m.message.content.substring(0, 50) + (m.message.content.length > 50 ? '...' : '') : 
-                        'structured content'}`;
-                } else if (m.type === 'assistant') {
-                    return `ASSISTANT: ${m.message.content[0]?.type === 'text' ? 
-                        (m.message.content[0] as any)?.text?.substring(0, 50) + ((m.message.content[0] as any)?.text?.length > 50 ? '...' : '') : 
-                        'structured content'}`;
+            // Yield final text content
+            const textContent = finalAssistantMessage.message.content
+                .filter(c => c.type === 'text')
+                .map(c => (c as { type: 'text'; text: string }).text)
+                .join('\n');
+            
+            if (textContent) {
+                logger.debug(`[ScriptaCore] Yielding final AssistantTextResponse: "${textContent.substring(0, 50)}..."`);
+                yield { type: 'AssistantTextResponse', text: textContent, messageId: finalAssistantMessage.message.id };
                 } else {
-                    return `OTHER: ${m.type}`;
-                }
-            }));
+                 logger.debug("[ScriptaCore] Final assistant response had no text content (potentially only tool calls).");
+                 // If the final response ONLY contained tool calls and the loop didn't run (e.g., all denied),
+                 // we might need to yield a specific message here or let the driving layer handle it.
+            }
+            
+            // Yield AssistantMessageEnd event
+            yield { type: 'AssistantMessageEnd', message: finalAssistantMessage };
+
+            // --- Save final state --- 
+            logger.debug(`[ScriptaCore] Saving final session state with ${currentMessagesForTurn.length} messages.`);
+            await sessionManager.setMessages(sessionId, currentMessagesForTurn);
+
+        } else {
+             logger.error("[ScriptaCore] No final assistant response available after processing.");
+             yield { type: 'ErrorOccurred', message: 'Core Error: No final assistant response generated.' };
         }
+        
+    } catch (error: any) { // Catch unexpected errors during processing
+        logger.error("[ScriptaCore] Unexpected error during processing:", error);
+        yield { type: 'ErrorOccurred', message: `Core Processing Error: ${error.message}`, error };
+    } finally {
+         // Signal that the core is idle
+         yield { type: 'ProgressUpdate', status: 'idle' };
+         logger.debug(`[ScriptaCore] Finished processing for session ${sessionId}.`);
     }
 }

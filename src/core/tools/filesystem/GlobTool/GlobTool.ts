@@ -57,22 +57,26 @@ export class CoreGlobTool extends BaseTool {
   }
 
   async *call(
-    { pattern, path }: GlobToolInput, 
-    { abortController }: ToolUseContext
+    { pattern, path, includeDirs }: GlobToolInput,
+    { abortSignal }: ToolUseContext
   ) {
     const start = Date.now();
-    const { files, truncated } = await glob(
-      pattern,
-      path ?? getCwd(),
-      { limit: 100, offset: 0 },
-      abortController.signal,
-    );
+    const absolutePath = getAbsolutePath(path) || getCwd();
+
+    const ignorePatterns = await getIgnorePatterns(absolutePath);
+    const files = await glob(pattern, {
+      cwd: absolutePath,
+      ignore: ignorePatterns,
+      absolute: true,
+      nodir: !includeDirs,
+      signal: abortSignal,
+    });
 
     const output: GlobToolOutput = {
       filenames: files,
       durationMs: Date.now() - start,
       numFiles: files.length,
-      truncated,
+      truncated: false,
     };
 
     yield {

@@ -39,10 +39,10 @@ import {
   type BinaryFeedbackResult,
   type Message as MessageType,
   type ProgressMessage,
-  // Imported from core/agent instead of query
+  type UserMessage,
 } from '../core/agent'
 import type { WrappedClient } from '../services/mcpClient'
-import type { Tool } from '../core/tools/types'
+import type { Tool } from '../core/tools'
 import { getTool, getToolOrThrow } from '../core/tools'
 import { AutoUpdaterResult } from '../utils/autoUpdater'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config'
@@ -56,10 +56,8 @@ import {
   getUnresolvedToolUseIDs,
   INTERRUPT_MESSAGE,
   isNotEmptyMessage,
-  type NormalizedMessage,
   normalizeMessages,
   normalizeMessagesForAPI,
-  // Removed processUserInput - using ScriptaCore's processInput instead
   reorderMessages,
   createAssistantMessage,
   createAssistantAPIErrorMessage,
@@ -72,8 +70,10 @@ import { getMaxThinkingTokens } from '../utils/thinking'
 import { CliPermissionHandler } from '../cli/permissions/CliPermissionHandler'
 import { getCwd, getOriginalCwd } from '../utils/state'
 import { getClients } from '../services/mcpClient.js'
-import { processInput, CoreEvent } from '../core/ScriptaCore'
+import { processInput } from '../core/ScriptaCore'
+import { CoreEvent } from '../core/agent/types'
 import { IPermissionHandler, PermissionHandlerContext } from "../core/permissions/IPermissionHandler";
+import { ToolUseContext } from '../core/tools/interfaces/Tool';
 import { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { renderToolResultMessage } from '../cli/renderers/toolRenderers'
 import { CliSessionManager } from '../cli/session/CliSessionManager'
@@ -183,14 +183,17 @@ function PermissionPrompt({ request }: PermissionPromptProps) {
                             </Box>
                             {intersperse(
                                 patch.map(p => (
-                                    <StructuredDiff
-                                        key={p.newStart}
-                                        patch={p}
-                                        dim={false}
-                                        width={columns - 12}
-                                    />
+                                    // Wrap StructuredDiff in a Box and apply key there
+                                    <Box key={p.newStart}>
+                                        <StructuredDiff
+                                            patch={p}
+                                            dim={false}
+                                            width={columns - 12}
+                                        />
+                                    </Box>
                                 )),
                                 i => (
+                                    // @ts-ignore - Ink/React handles the key prop for Text
                                     <Text color={theme.secondaryText} key={`ellipsis-${i}`}>
                                         ...
                                     </Text>
@@ -228,14 +231,17 @@ function PermissionPrompt({ request }: PermissionPromptProps) {
                                 </Box>
                                 {intersperse(
                                     hunks.map(p => (
-                                        <StructuredDiff
-                                            key={p.newStart}
-                                            patch={p}
-                                            dim={false}
-                                            width={columns - 12}
-                                        />
+                                        // Wrap StructuredDiff in a Box and apply key there
+                                        <Box key={p.newStart}>
+                                            <StructuredDiff
+                                                patch={p}
+                                                dim={false}
+                                                width={columns - 12}
+                                            />
+                                        </Box>
                                     )),
                                     i => (
+                                        // @ts-ignore - Ink/React handles the key prop for Text
                                         <Text color={theme.secondaryText} key={`ellipsis-${i}`}>
                                             ...
                                         </Text>
@@ -649,245 +655,288 @@ export function REPL({
     }
   }
 
-  const handleCoreEvent = useCallback(async (coreEvent: CoreEvent, abortController: AbortController) => {
-    switch (coreEvent.type) {
-      case 'assistantResponse':
-        logger.debug(`Received assistantResponse:`, coreEvent.text);
-        
-        // Check if this response is a duplicate of the last message
-        const lastMessage = messages[messages.length - 1];
-        const isDuplicate = lastMessage?.type === 'assistant' && 
-            lastMessage?.message?.content[0]?.type === 'text' && 
-            (lastMessage.message.content[0] as any).text === coreEvent.text;
-            
-        // Skip adding duplicate messages
-        if (isDuplicate) {
-          logAssistantResponse(coreEvent.text, true);
-          return undefined;
-        } else {
-          logAssistantResponse(coreEvent.text, false);
-        }
-        
-        // Create an assistant message from the text and add it to the messages state
-        const assistantMsg = createAssistantMessage(coreEvent.text);
-        setMessages(oldMessages => [...oldMessages, assistantMsg]);
-        // Trigger sync after messages are updated
-        setShouldSyncMessages(true);
-        // Return undefined immediately, don't process this event further
-        return undefined;
+  const handleCoreEvent = useCallback(async (
+      coreEvent: CoreEvent, 
+      abortController: AbortController // Pass the main abort controller
+  ): Promise<ToolResultBlockParam | undefined> => {
+    logger.debug(`Handling CoreEvent: ${coreEvent.type}`, coreEvent);
 
-      case 'error':
-        logger.error(`Received error: ${coreEvent.message}`, coreEvent.error);
+    switch (coreEvent.type) {
+      case 'AssistantTextResponse':
+        // Update UI with streaming text
+        // Find the latest assistant message being streamed (might need better tracking)
+        setMessages(prevMessages => {
+            const lastMsgIndex = prevMessages.length - 1;
+            if (lastMsgIndex >= 0 && prevMessages[lastMsgIndex]?.type === 'assistant') {
+                const updatedMessages = [...prevMessages];
+                const lastMsg = updatedMessages[lastMsgIndex] as AssistantMessage; // Cast needed
+                // Append text to the last message content if it's a text block
+                const content = lastMsg.message.content;
+                if (content.length > 0 && content[content.length - 1]?.type === 'text') {
+                    content[content.length - 1]!.text += coreEvent.text; 
+        } else {
+                    // Or add a new text block if the last block wasn't text
+                    content.push({ type: 'text', text: coreEvent.text });
+                }
+                updatedMessages[lastMsgIndex] = { ...lastMsg }; // Ensure re-render
+                return updatedMessages;
+            }
+            // If no assistant message exists yet, create a placeholder? Or wait for AssistantMessageStart?
+             logger.warn("Received AssistantTextResponse but no active assistant message found.");
+            return prevMessages; // Return unchanged if no assistant message
+        });
+        return undefined; // Does not yield back to generator
+
+      case 'AssistantMessageStart':
+        // Add the initial assistant message shell to the messages list
+        setMessages(prevMessages => [...prevMessages, coreEvent.message as MessageType]); // Add type assertion
+        return undefined; // Does not yield back to generator
+        
+      case 'AssistantMessageEnd':
+        // Update the final assistant message details (cost, duration, etc.)
+        setMessages(prevMessages => {
+          const msgIndex = prevMessages.findIndex(m => m.uuid === coreEvent.message.uuid);
+          if (msgIndex !== -1) {
+            const updatedMessages = [...prevMessages];
+            updatedMessages[msgIndex] = coreEvent.message as MessageType; // Update with final details & assert type
+            return updatedMessages;
+          }
+          logger.warn(`Could not find message ${coreEvent.message.uuid} to finalize.`);
+          return prevMessages;
+        });
+        return undefined; // Does not yield back to generator
+
+      case 'ProgressUpdate':
+        // Update UI with progress status (e.g., show a spinner)
+        logger.info(`Progress: ${coreEvent.status} ${coreEvent.message || ''} ${coreEvent.toolUseId || ''}`);
+        // Potentially update a status indicator in the UI here
+         if (coreEvent.status === 'thinking') {
+           // You could set a specific 'thinking' state here
+         } else if (coreEvent.status === 'tool_executing') {
+           // Indicate which tool is running
+         }
+        return undefined; // Does not yield back to generator
+
+      case 'ErrorOccurred':
+        // Display error message to the user
+        logger.error(`Core Error: ${coreEvent.message}`, coreEvent.error);
         const errorMsg = createAssistantAPIErrorMessage(coreEvent.message);
         setMessages(oldMessages => [...oldMessages, errorMsg]);
-        // Trigger sync after messages are updated
-        setShouldSyncMessages(true);
-        return undefined; // No result to send back
-
-      case 'toolRequest':
-        logger.debug(`Received toolRequest: ${coreEvent.toolName}`, {
-          inputSize: typeof coreEvent.toolInput === 'string' ? 
-            `${Math.min(coreEvent.toolInput.length, 30)} chars` + 
-            (coreEvent.toolInput.length > 30 ? '...' : '') :
-            'object',
-          toolUseId: coreEvent.toolUseId // Log the tool use ID for tracing
-        });
-
-        // --- Actual Tool Execution Logic ---
-        let toolResult: ToolResultBlockParam | undefined = undefined;
-        // Try to get the tool from the registry first, then fall back to props
-        let toolToUse = getTool(coreEvent.toolName);
-        
-        // If not found in registry, try to find in the tools passed as props
-        if (!toolToUse) {
-          toolToUse = tools.find(t => t.name === coreEvent.toolName);
-        }
-
-        if (!toolToUse) {
-          // Construct result object directly
-          toolResult = {
+        // Potentially yield an error tool result if tied to a tool
+        if (coreEvent.toolUseId) {
+           return {
             type: 'tool_result',
             tool_use_id: coreEvent.toolUseId,
-            content: `Error: Tool '${coreEvent.toolName}' not found. Available tools: ${tools.map(t => t.name).join(', ')}`,
+               content: `Error during tool processing: ${coreEvent.message}`,
             is_error: true,
           };
-        } else {
-          try {
-            // Create the context required by the permission handler methods
-            const permissionContext: PermissionHandlerContext = {
-              abortController: abortController, // Use the controller for this query
-              options: {
-                dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
-              }
-            };
-            
-            // Add event listener to propagate aborts from main controller to permission context
-            abortController.signal.addEventListener('abort', () => {
-              permissionContext.abortController.abort('Main flow aborted');
-            });
-            
-            // 1. Check for existing permission first
-            logger.debug(`Checking permission for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
-            let granted = await permissionHandler.checkPermission(toolToUse, coreEvent.toolInput, permissionContext);
+        }
+        return undefined; // Or handle differently if not tool-related
 
-            // 2. If not granted, request it
-            if (!granted) {
-              logger.debug(`No existing permission found. Requesting via handler for ${toolToUse.name} (ID: ${coreEvent.toolUseId})`);
-              const lastAssistantMessage = messages.slice().reverse().find(m => m.type === 'assistant') as AssistantMessage | undefined;
-              
-              granted = await permissionHandler.requestPermission(
-                toolToUse,
-                coreEvent.toolInput,
-                permissionContext,
-                lastAssistantMessage
-              );
-            }
 
-            if (granted) {
-              logger.debug(`Permission granted. Calling tool: ${coreEvent.toolName}`);
-              
-              // Add feedback message to UI confirming permission was granted
-              const permissionGrantedMsg = {
-                type: 'assistant',
-                message: {
-                  id: `permission-granted-${Date.now()}`,
-                  role: 'assistant',
-                  content: [{ 
-                    type: 'text', 
-                    text: `Permission granted for ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
-                  }]
+      case 'ToolResultYielded':
+        // The core has processed a result we sent back.
+        // We should NOT add UI elements to the message state here.
+        // Just log that the core acknowledged the result.
+        logger.debug(`Core acknowledged ToolResult for: ${coreEvent.toolUseId}`, coreEvent.result);
+        return undefined; // Does not yield back to generator
+
+
+      case 'ToolRequested':
+        logger.debug(`Tool Requested: ${coreEvent.toolName} with ID: ${coreEvent.toolUseId}`);
+        let toolResult: ToolResultBlockParam | undefined = undefined;
+        let toolToUse: Tool | null = null;
+
+        try {
+          // Call getToolOrThrow with only the tool name
+          toolToUse = getToolOrThrow(coreEvent.toolName);
+          logger.debug(`Found tool: ${toolToUse.name}`);
+
+          // Construct PermissionHandlerContext
+          const permissionContext: PermissionHandlerContext = {
+            abortSignal: abortController.signal, // Use the signal from the passed controller
+            options: { // Pass relevant options
+              dangerouslySkipPermissions,
+              tools,
+              // Add other relevant options from Props if needed
+            },
+            // readFileTimestamps: {}, // Required by ToolUseContext, provide if available, else empty
+            sessionManager: sessionManager, // Pass the session manager
+            sessionId: 'cli-session' // Assuming a fixed session ID for CLI
+          };
+
+          // Check permission
+          const hasPermission = await permissionHandler.checkPermission(toolToUse, coreEvent.toolInput, permissionContext);
+
+          // Pass undefined for the optional assistantMessage argument
+          if (hasPermission || await permissionHandler.requestPermission(toolToUse, coreEvent.toolInput, permissionContext, undefined)) {
+            logger.debug(`Permission granted for tool: ${toolToUse.name}`);
+            setIsLoading(true); // Show loading while tool executes
+
+            // Construct ToolUseContext required by tool.call
+            // Get the latest message ID (likely the assistant message requesting the tool)
+            const lastMessage = messages[messages.length - 1];
+            const messageUuid = lastMessage?.uuid ?? 'unknown-message-uuid'; // Provide a fallback
+
+            const toolUseContext: ToolUseContext = { // Match the type from Tool.ts
+                uuid: coreEvent.toolUseId, // Use the ID from the event
+                messageUuid: messageUuid,
+                cwd: getCwd(), // Get current working directory
+                abortSignal: abortController.signal, // Pass the abort signal
+                // Create the nested 'options' object expected by some tools
+                options: {
+                    dangerouslySkipPermissions: permissionContext.options.dangerouslySkipPermissions,
+                    // Pass other relevant options from props or state if needed by tools like AgentTool
+                    // These might need to be retrieved from the main component props or state
+                    forkNumber: forkNumber, 
+                    messageLogName: messageLogName,
+                    // verbose: verbose, // Assuming verbose might come from props/state
+                    tools: tools // Pass the list of tools
                 },
-                isSuccessMessage: true,
-                durationMs: 0,
-                costUSD: 0
-              };
-              setMessages(oldMessages => [...oldMessages, permissionGrantedMsg]);
-              
-              const output = await toolToUse.call(
-                coreEvent.toolInput,
-                { 
-                  abortController,
-                  options: {
-                    dangerouslySkipPermissions: dangerouslySkipPermissions ?? false,
-                    forkNumber,
-                    messageLogName,
-                    verbose: false
-                  },
-                  readFileTimestamps: {}
-                }
-              );
-              logger.debug(`Tool ${coreEvent.toolName} finished. Raw Output Type:`, typeof output);
+                 // readFileTimestamps might also be needed at this level if used by tools directly
+                // readFileTimestamps: readFileTimestamps.current 
+            };
 
-              // Handle generator output
-              if (typeof output === 'object' && output !== null && typeof output[Symbol.asyncIterator] === 'function') {
-                let finalResult = null;
-                let resultForAssistant = null;
-                
-                for await (const value of output) {
-                  if (value.type === 'result') {
-                    finalResult = value.data;
-                    resultForAssistant = value.resultForAssistant;
-                  }
-                }
-                
-                if (finalResult) {
-                  // Create user message with tool result
-                  const toolMessage = {
-                    type: 'user',
-                    message: {
-                      id: `tool-result-${Date.now()}`,
-                      role: 'user',
-                      content: [
-                        {
-                          type: 'tool_result',
-                          tool_use_id: coreEvent.toolUseId,
-                          content: JSON.stringify(finalResult, null, 2)
-                        }
-                      ]
-                    },
-                    toolUseResult: {
-                      data: finalResult,
-                      tool_use_id: coreEvent.toolUseId
-                    }
-                  };
-                  setMessages(oldMessages => [...oldMessages, toolMessage]);
-                  
-                  // Format for LLM
+            // Abort handling should primarily be managed via the signal passed in the context.
+
+            try {
+                // Execute the tool using tool.call which might be sync or async generator
+                // Pass the correctly structured ToolUseContext
+                const output = await toolToUse.call(coreEvent.toolInput, toolUseContext); 
+
+                 // --- Process Tool Output (Handling both Generator and Direct Return) ---
+                 let finalResult: any = null;
+                 let resultForAssistant: string | null = null; // Textual summary for LLM
+
+                 if (typeof output === 'object' && output !== null && typeof (output as any)[Symbol.asyncIterator] === 'function') {
+                     // Handle Async Generator (e.g., streaming tools)
+                     logger.debug(`Tool ${toolToUse.name} returned an async generator.`);
+                     const generator = output as AsyncGenerator<any, any, any>;
+                     let lastYieldedValue: any = null;
+
+                     while (true) {
+                         const { value, done } = await generator.next();
+                         if (done) {
+                             finalResult = value; // The final return value of the generator
+                             logger.debug(`Tool generator finished, final result:`, finalResult);
+                             break;
+                         } else {
+                             lastYieldedValue = value;
+                             logger.debug(`Tool yielded value:`, value);
+                             // Handle intermediate yields (e.g., update UI, progress)
+                             // For simplicity, we'll just log for now
+                             if (typeof value === 'object' && value !== null) {
+                                 if (value.resultForAssistant) {
+                                     resultForAssistant = value.resultForAssistant; // Capture LLM summary if provided
+                                 }
+                                 // Could update UI incrementally here based on yielded value structure
+                             }
+                         }
+                     }
+                     // If generator returned nothing explicitly, use the last yielded value
+                     if (finalResult === undefined && lastYieldedValue !== null) {
+                         finalResult = lastYieldedValue;
+                         logger.debug(`Generator returned undefined, using last yielded value as final result.`);
+                     }
+                     // If the final result has a specific format for the assistant, use it
+                     if (typeof finalResult === 'object' && finalResult !== null && finalResult.resultForAssistant) {
+                       resultForAssistant = finalResult.resultForAssistant;
+                     }
+
+                 } else {
+                     // Handle Direct Return Value (non-generator)
+                      logger.debug(`Tool ${toolToUse.name} returned directly:`, output);
+                     finalResult = output;
+                      // Check if the direct result provides a specific summary
+                      if (typeof finalResult === 'object' && finalResult !== null && finalResult.resultForAssistant) {
+                          resultForAssistant = finalResult.resultForAssistant;
+                      }
+                 }
+
+                 // --- Construct ToolResultBlockParam ---
                   toolResult = {
                     type: 'tool_result',
                     tool_use_id: coreEvent.toolUseId,
-                    content: resultForAssistant || JSON.stringify(finalResult, null, 2),
-                    is_error: false
-                  };
-                }
-              } else {
-                // Handle non-generator response (string or other)
-                const resultStr = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
-                
+                     // Use resultForAssistant if available, otherwise stringify the final result
+                     // Wrap the string content in a text block array for API compatibility
+                     content: [{
+                         type: 'text',
+                         text: resultForAssistant ?? (typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult ?? 'Tool executed successfully.', null, 2))
+                     }], 
+                     is_error: false // Assuming success if we reached here without error
+                 };
+
+
+            } catch (error: any) {
+               logger.error(`Error executing tool ${coreEvent.toolName}:`, error);
+               let errorMessage = `Error executing tool: ${coreEvent.toolName}.`;
+               if (error instanceof Error) {
+                 errorMessage += ` ${error.message}`;
+               }
                 toolResult = {
                   type: 'tool_result',
                   tool_use_id: coreEvent.toolUseId,
-                  content: resultStr,
-                  is_error: false
+                 content: errorMessage,
+                 is_error: true
                 };
+            } finally {
+                 // Clean up?
+                 // No abort listener to remove here for toolUseContext
+                 setIsLoading(false); // Stop loading indicator
               }
 
             } else {
               logger.debug(`Permission denied for tool: ${coreEvent.toolName}`);
-              
-              // Add feedback message for denying permission with an error dot
-              const permissionDeniedMsg = {
-                type: 'assistant',
-                message: {
-                  id: `permission-denied-${Date.now()}`,
-                  role: 'assistant',
-                  content: [{ 
-                    type: 'text', 
-                    text: `User rejected ${toolToUse.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}` 
-                  }]
-                },
-                isErrorMessage: true,
-                durationMs: 0,
-                costUSD: 0
-              };
-              setMessages(oldMessages => [...oldMessages, permissionDeniedMsg]);
-              
-              // Construct result object directly
+             // Construct result object indicating permission denial
               toolResult = {
                 type: 'tool_result',
                 tool_use_id: coreEvent.toolUseId,
-                content: `Permission denied by user for tool: ${coreEvent.toolName}`,
-                is_error: true
-              };
+              // Format content as a text block array for API compatibility
+              content: [{ type: 'text', text: `Permission denied by user for tool: ${coreEvent.toolName}` }], 
+              is_error: true // Treat permission denial as an error for the LLM
+            };
+            // Add feedback message for denying permission
+             // Use createAssistantAPIErrorMessage to create the message and mark it as an error
+             const permissionDeniedMsg = createAssistantAPIErrorMessage(
+                 `User rejected ${toolToUse?.userFacingName?.(coreEvent.toolInput) || coreEvent.toolName}`
+             );
+             setMessages(oldMessages => [...oldMessages, permissionDeniedMsg]);
+             // Ensure loading state is reset when permission is denied
+             setIsLoading(false); 
             }
           } catch (error: any) {
-            logger.error(`Error executing tool ${coreEvent.toolName}:`, error);
-            let errorMessage = `Error executing tool: ${coreEvent.toolName}.`;
+          logger.error(`Error preparing or checking permission for tool ${coreEvent.toolName}:`, error);
+          let errorMessage = `Error setting up tool: ${coreEvent.toolName}.`;
             if (error instanceof Error) {
               errorMessage += ` ${error.message}`;
             }
-            // Construct result object directly
+          // Construct result object directly for setup errors
             toolResult = {
               type: 'tool_result',
               tool_use_id: coreEvent.toolUseId,
               content: errorMessage,
               is_error: true
             };
-          }
         }
 
-        logger.debug(`Sending result for ${coreEvent.toolUseId}:`, {
+        // Log the result being sent back (careful with large content)
+         logger.debug(`Sending result for ${coreEvent.toolUseId} back to core:`, {
           type: toolResult?.type,
           tool_use_id: toolResult?.tool_use_id,
           is_error: toolResult?.is_error,
           contentSize: typeof toolResult?.content === 'string' ? 
-            `${Math.min(toolResult.content.length, 50)} chars` + 
-            (toolResult.content.length > 50 ? '...' : '') : 'object'
+             `${Math.min(toolResult.content.length, 100)} chars` +
+             (toolResult.content.length > 100 ? '...' : '') : (toolResult?.content ? 'object/array' : 'null/undefined')
         });
+
+        // Return the result to the core generator
         return toolResult;
 
       default:
-        logger.debug(`Received unknown CoreEvent type:`, (coreEvent as any)?.type);
+        // Log unhandled event types using type assertion for exhaustive check simulation
+        // Ensure logger.warn receives only one string argument
+        const eventType = (coreEvent as any)?.type ?? 'unknown';
+        logger.warn(`Received unhandled CoreEvent type: ${eventType}`); 
         return undefined;
     }
   }, [tools, permissionHandler, dangerouslySkipPermissions, forkNumber, messageLogName, messages, setMessages, conditionalLog, sessionManager]);
@@ -1066,45 +1115,10 @@ export function REPL({
       },
       ...reorderMessages(currentNormalizedMessages).map(_ => {
         const toolUseID = getToolUseID(_)
-        const message =
-          _.type === 'progress' ? (
-            _.content.message.content[0]?.type === 'text' &&
-            _.content.message.content[0].text === INTERRUPT_MESSAGE ? (
-              <Message
-                message={_.content}
-                messages={_.normalizedMessages}
-                addMargin={false}
-                tools={_.tools}
-                verbose={verbose ?? false}
-                debug={debug}
-                erroredToolUseIDs={new Set()}
-                inProgressToolUseIDs={new Set()}
-                unresolvedToolUseIDs={new Set()}
-                shouldAnimate={false}
-                shouldShowDot={false}
-              />
-            ) : (
-              <MessageResponse children={ 
-                <Message
-                  message={_.content}
-                  messages={_.normalizedMessages}
-                  addMargin={false}
-                  tools={_.tools}
-                  verbose={verbose ?? false}
-                  debug={debug}
-                  erroredToolUseIDs={new Set()}
-                  inProgressToolUseIDs={new Set()}
-                  unresolvedToolUseIDs={
-                    new Set([
-                      (_.content.message.content[0]! as ToolUseBlockParam).id,
-                    ])
-                  }
-                  shouldAnimate={false}
-                  shouldShowDot={false}
-                />
-              } />
-            )
-          ) : (
+        
+        // Removed the check for _.type === 'progress' as they are filtered out by the outer normalizeMessages hook
+        // Default rendering is now using the Message component
+        const message = (
             <Message
               message={_}
               messages={currentNormalizedMessages}
@@ -1123,8 +1137,10 @@ export function REPL({
               shouldShowDot={true}
               unresolvedToolUseIDs={unresolvedToolUseIDs ?? new Set()}
             />
-          );
+        );
 
+        // Determine if static or transient 
+        // Pass the already normalized message list from the outer scope
         const type = shouldRenderStatically(
           _,
           currentNormalizedMessages,
@@ -1161,7 +1177,7 @@ export function REPL({
     ];
     return staticPart;
   }, [
-    // Keep full dependencies
+    // Keep full dependencies - use the memoized normalizedMessages
     forkNumber, normalizedMessages, tools, verbose, debug, erroredToolUseIDs, 
     inProgressToolUseIDs, toolJSX, toolUseConfirm, isMessageSelectorVisible, 
     unresolvedToolUseIDs, mcpClientState, isDefaultModelState
@@ -1214,8 +1230,8 @@ export function REPL({
             />
           )}
 
-        {/* Conditionally render PermissionPrompt */} 
-        {permissionRequest && (
+        {/* Conditionally render PermissionPrompt */}
+        { permissionRequest && (
             <>
               {console.debug("[REPL] Rendering permission request for:", permissionRequest.toolName)}
               <PermissionPrompt request={permissionRequest} />
@@ -1224,43 +1240,38 @@ export function REPL({
 
         {/* Conditionally render PromptInput, disabling if permissionRequest is active */}
         <Box flexDirection="column">
-            {!toolUseConfirm &&
-              !toolJSX?.shouldHidePromptInput &&
-              shouldShowPromptInput &&
-              !isMessageSelectorVisible &&
-              !binaryFeedbackContext &&
-              !showingCostDialog && (
-              <PromptInput
-                  commands={commands}
-                  forkNumber={forkNumber}
-                  messageLogName={messageLogName}
-                  tools={tools}
-                  isDisabled={isLoading || !!permissionRequest} // Disable input during loading OR permission request
-                  isLoading={isLoading}
-                  onQuery={onQuery}
-                  debug={debug}
-                  verbose={verbose}
-                  messages={messages}
-                  setToolJSX={setToolJSX}
-                  onAutoUpdaterResult={setAutoUpdaterResult}
-                  autoUpdaterResult={autoUpdaterResult}
-                  input={inputValue}
-                  onInputChange={setInputValue}
-                  mode={inputMode}
-                  onModeChange={setInputMode}
-                  submitCount={submitCount}
-                  onSubmitCountChange={setSubmitCount}
-                  setIsLoading={setIsLoading}
-                  setAbortController={setAbortController}
-                  onShowMessageSelector={() =>
-                    setIsMessageSelectorVisible(prev => !prev)
-                  }
-                  setForkConvoWithMessagesOnTheNextRender={
-                    setForkConvoWithMessagesOnTheNextRender
-                  }
-                  readFileTimestamps={readFileTimestamps.current}
-              />
-          )}
+            {/* Always render PromptInput, but keep isDisabled logic */}
+            <PromptInput
+                commands={commands}
+                forkNumber={forkNumber}
+                messageLogName={messageLogName}
+                tools={tools}
+                // Disable if loading OR simple permission prompt OR tool use confirm UI is active
+                isDisabled={isLoading || !!permissionRequest || !!toolUseConfirm} 
+                isLoading={isLoading}
+                onQuery={onQuery}
+                debug={debug}
+                verbose={verbose}
+                messages={messages}
+                setToolJSX={setToolJSX}
+                onAutoUpdaterResult={setAutoUpdaterResult}
+                autoUpdaterResult={autoUpdaterResult}
+                input={inputValue}
+                onInputChange={setInputValue}
+                mode={inputMode}
+                onModeChange={setInputMode}
+                submitCount={submitCount}
+                onSubmitCountChange={setSubmitCount}
+                setIsLoading={setIsLoading}
+                setAbortController={setAbortController}
+                onShowMessageSelector={() =>
+                  setIsMessageSelectorVisible(prev => !prev)
+                }
+                setForkConvoWithMessagesOnTheNextRender={
+                  setForkConvoWithMessagesOnTheNextRender
+                }
+                readFileTimestamps={readFileTimestamps.current}
+            />
         </Box>
       </Box>
       {isMessageSelectorVisible && (
@@ -1308,8 +1319,8 @@ export function REPL({
 }
 
 function shouldRenderStatically(
-  message: NormalizedMessage,
-  messages: NormalizedMessage[],
+  message: UserMessage | AssistantMessage,
+  messages: (UserMessage | AssistantMessage)[],
   unresolvedToolUseIDs: Set<string>,
 ): boolean {
   switch (message.type) {
@@ -1323,20 +1334,10 @@ function shouldRenderStatically(
         return false
       }
 
-      const correspondingProgressMessage = messages.find(
-        _ => _.type === 'progress' && _.toolUseID === toolUseID,
-      ) as ProgressMessage | null
-      if (!correspondingProgressMessage) {
-        return true
-      }
-
-      return !intersects(
-        unresolvedToolUseIDs,
-        correspondingProgressMessage.siblingToolUseIDs,
-      )
+      // Progress messages are filtered out, so we can't check for corresponding progress message
+      // Simplification: If the tool use is resolved (not in unresolvedToolUseIDs), render statically.
+      return true; 
     }
-    case 'progress':
-      return !intersects(unresolvedToolUseIDs, message.siblingToolUseIDs)
   }
 }
 

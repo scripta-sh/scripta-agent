@@ -1,12 +1,13 @@
 import { useCallback } from 'react'
+import * as React from 'react'
 import { hasPermissionsToUseTool } from '../permissions'
 import { logEvent } from '../services/statsig'
-import { BashTool } from '../core/tools'
+import { BashTool, inputSchema as bashToolInputSchema } from '../core/tools/shell'
 import { getCommandSubcommandPrefix } from '../utils/commands'
 import { REJECT_MESSAGE } from '../utils/messages'
 import type { Tool as ToolType } from '../core/tools'
-import type { ToolUseContext } from '../core/tools/types'
-import { AssistantMessage } from '../query'
+import { PermissionHandlerContext } from '../core/permissions/IPermissionHandler'
+import { AssistantMessage } from '../core/agent'
 import { ToolUseConfirm } from '../components/permissions/PermissionRequest'
 import { AbortError } from '../utils/errors'
 import { logError } from '../utils/log'
@@ -16,7 +17,7 @@ type SetState<T> = React.Dispatch<React.SetStateAction<T>>
 export type CanUseToolFn = (
   tool: ToolType,
   input: { [key: string]: unknown },
-  toolUseContext: ToolUseContext,
+  context: PermissionHandlerContext,
   assistantMessage: AssistantMessage,
 ) => Promise<{ result: true } | { result: false; message: string }>
 
@@ -24,7 +25,7 @@ function useCanUseTool(
   setToolUseConfirm: SetState<ToolUseConfirm | null>,
 ): CanUseToolFn {
   return useCallback<CanUseToolFn>(
-    async (tool, input, toolUseContext, assistantMessage) => {
+    async (tool, input, context, assistantMessage) => {
       return new Promise(resolve => {
         function logCancelledEvent() {
           logEvent('tengu_tool_use_cancelled', {
@@ -41,19 +42,21 @@ function useCanUseTool(
           // Trigger a synthetic assistant message in query(), to cancel
           // any other pending tool uses and stop further requests to the
           // API and wait for user input.
-          toolUseContext.abortController.abort()
+          // context.abortController.abort() // <-- Can't abort via context anymore
+          // Aborting needs to be handled by the caller based on the resolved promise
+          // or by checking context.abortSignal elsewhere.
         }
 
-        if (toolUseContext.abortController.signal.aborted) {
+        if (context.abortSignal.aborted) { // <-- Check context.abortSignal
           logCancelledEvent()
-          resolveWithCancelledAndAbortAllToolCalls()
+          resolveWithCancelledAndAbortAllToolCalls() // Resolve false, caller handles abort
           return
         }
 
         return hasPermissionsToUseTool(
           tool,
           input,
-          toolUseContext,
+          context, // <-- Pass the correct context
           assistantMessage,
         )
           .then(async result => {
@@ -69,15 +72,15 @@ function useCanUseTool(
 
             const [description, commandPrefix] = await Promise.all([
               tool.description(input as never),
-              tool === BashTool
+              tool.name === 'Bash'
                 ? getCommandSubcommandPrefix(
-                    inputSchema.parse(input).command, // already validated upstream, so ok to parse (as opposed to safeParse)
-                    toolUseContext.abortController.signal,
+                    bashToolInputSchema.parse(input).command,
+                    context.abortSignal,
                   )
                 : Promise.resolve(null),
             ])
 
-            if (toolUseContext.abortController.signal.aborted) {
+            if (context.abortSignal.aborted) {
               logCancelledEvent()
               resolveWithCancelledAndAbortAllToolCalls()
               return

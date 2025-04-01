@@ -1,19 +1,20 @@
 import { randomUUID, UUID } from 'crypto'
 import { Box } from 'ink'
 import {
-  AssistantMessage,
   Message,
   ProgressMessage,
   UserMessage,
-} from '../query.js'
+  AssistantMessage,
+} from '../core/agent'
 import { getCommand, hasCommand } from '../commands'
 import { MalformedCommandError } from './errors'
 import { logError } from './log'
 import { resolve } from 'path'
 import { last, memoize } from 'lodash-es'
 import { logEvent } from '../services/statsig'
+import { Command } from '../commands.js'
 import type { SetToolJSXFn } from '../types/tool-ui'
-import type { Tool, ToolUseContext } from '../core/tools/types'
+import type { Tool, ToolUseContext } from '../core/tools'
 import { lastX } from '../utils/generators'
 import { NO_CONTENT_MESSAGE } from '../core/constants/providerErrors.js'
 import {
@@ -33,6 +34,7 @@ import { UserBashInputMessage } from '../components/messages/UserBashInputMessag
 import { Spinner } from '../components/Spinner'
 import { BashTool } from '../core/tools'
 import { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
+import { getContext } from '../context.js'
 
 export const INTERRUPT_MESSAGE = '[Request interrupted by user]'
 export const INTERRUPT_MESSAGE_FOR_TOOL_USE =
@@ -129,7 +131,7 @@ export function createProgressMessage(
   toolUseID: string,
   siblingToolUseIDs: Set<string>,
   content: AssistantMessage,
-  normalizedMessages: NormalizedMessage[],
+  normalizedMessages: (UserMessage | AssistantMessage)[],
   tools: Tool[],
 ): ProgressMessage {
   return {
@@ -274,7 +276,6 @@ export async function processUserInput(
       newMessages[0]!.type === 'user' &&
       newMessages[1]!.type === 'assistant' &&
       typeof newMessages[1]!.message.content === 'string' &&
-      // @ts-expect-error: TODO: this is probably a bug
       newMessages[1]!.message.content.startsWith('Unknown command:')
     ) {
       logEvent('tengu_input_slash_invalid', { input })
@@ -533,64 +534,76 @@ export function isNotEmptyMessage(message: Message): boolean {
   )
 }
 
-// TODO: replace this with plain UserMessage if/when PR #405 lands
-type NormalizedUserMessage = {
-  message: {
-    content: [
-      | TextBlockParam
-      | ImageBlockParam
-      | ToolUseBlockParam
-      | ToolResultBlockParam,
-    ]
-    role: 'user'
-  }
-  type: 'user'
-  uuid: UUID
-}
-
-export type NormalizedMessage =
-  | NormalizedUserMessage
-  | AssistantMessage
-  | ProgressMessage
-
 // Split messages, so each content block gets its own message
-export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
+export function normalizeMessages(messages: Message[]): (UserMessage | AssistantMessage)[] {
   return messages.flatMap(message => {
-    if (message.type === 'progress') {
-      return [message] as NormalizedMessage[]
+    // Filter out ProgressMessage
+    if (message.type === 'progress') { return []; }
+    // Filter out ToolResultMessage
+    if (message.type === 'tool_result') { return []; }
+
+    // --- Add Debug Logging --- 
+    if (!message.message) {
+        console.error(
+            "[normalizeMessages] CRITICAL: Encountered message without nested 'message' property:", 
+            JSON.stringify(message, null, 2)
+        );
+        // Returning [] prevents the crash but hides the root cause. 
+        // The real fix is preventing this malformed object from entering the state.
+        return []; 
     }
+    // --- End Debug Logging ---
+
+    // At this point, message should be UserMessage or AssistantMessage
+    // ERROR happens here: implies message.message is undefined
     if (typeof message.message.content === 'string') {
-      return [message] as NormalizedMessage[]
-    }
-    return message.message.content.map(_ => {
-      switch (message.type) {
-        case 'assistant':
-          return {
-            type: 'assistant',
-            uuid: randomUUID(),
-            message: {
-              ...message.message,
-              content: [_],
-            },
-            costUSD:
-              (message as AssistantMessage).costUSD /
-              message.message.content.length,
-            durationMs: (message as AssistantMessage).durationMs,
-          } as NormalizedMessage
-        case 'user':
-          // It seems like the line below was a no-op before, but I'm not sure.
-          // To check, we could throw an error if any of the following are true:
-          // - message `role` does isn't `user` -- this possibility is allowed by MCP tools,
-          //   though isn't supposed to happen in practice (we should fix this)
-          // - message `content` is not an array -- this one is more concerning because it's
-          //   not allowed by the `NormalizedUserMessage` type, but if it's happening that was
-          //   probably a bug before.
-          // Maybe I'm missing something? -(ab)
-          // return createUserMessage([_]) as NormalizedMessage
-          return message as NormalizedUserMessage
+      // Ensure it's a valid NormalizedMessage type before returning
+      if (message.type === 'user' || message.type === 'assistant') {
+          // Cast to the expected union type for the return value
+          return [message] as (UserMessage | AssistantMessage)[];
+      } else {
+          // Should not happen if types are correct, but handle defensively
+          console.warn(`normalizeMessages: Unexpected message type with string content: ${message.type}`);
+          return [];
       }
-    })
-  })
+    }
+
+    // Handle array content (should be UserMessage or AssistantMessage)
+    if (Array.isArray(message.message.content)) {
+        // Map and filter out nulls
+        const mappedMessages = message.message.content.map(_ => {
+            switch (message.type) {
+            case 'assistant':
+                // Split assistant message per content block
+                return {
+                    type: 'assistant',
+                    uuid: randomUUID(),
+                    message: {
+                        ...message.message,
+                        content: [_],
+                    },
+                    costUSD:
+                        (message as AssistantMessage).costUSD /
+                        message.message.content.length,
+                    durationMs: (message as AssistantMessage).durationMs,
+                } as AssistantMessage; // Explicitly cast to AssistantMessage
+            case 'user':
+                // Assuming user messages with array content are returned as is
+                // but ensure the type matches the expected return union
+                 return message as UserMessage; // Explicitly cast to UserMessage
+            default:
+                 console.warn(`normalizeMessages: Unexpected message type in map: ${message.type}`);
+                 return null; 
+            }
+        }).filter(m => m !== null);
+        
+        // Cast the final array to the expected return type
+        return mappedMessages as (UserMessage | AssistantMessage)[]; 
+    } else {
+        console.warn(`normalizeMessages: Unexpected content type for message type ${message.type}:`, message.message.content);
+        return []; // Filter out malformed message
+    }
+  });
 }
 
 type ToolUseRequestMessage = AssistantMessage & {
@@ -610,9 +623,9 @@ function isToolUseRequestMessage(
 
 // Re-order, to move result messages to be after their tool use messages
 export function reorderMessages(
-  messages: NormalizedMessage[],
-): NormalizedMessage[] {
-  const ms: NormalizedMessage[] = []
+  messages: (UserMessage | AssistantMessage)[],
+): (UserMessage | AssistantMessage)[] {
+  const ms: (UserMessage | AssistantMessage)[] = []
   const toolUseMessages: ToolUseRequestMessage[] = []
 
   for (const message of messages) {
@@ -621,27 +634,7 @@ export function reorderMessages(
       toolUseMessages.push(message)
     }
 
-    // if it's a tool progress message...
-    if (message.type === 'progress') {
-      // replace any existing progress messages with this one
-      const existingProgressMessage = ms.find(
-        _ => _.type === 'progress' && _.toolUseID === message.toolUseID,
-      )
-      if (existingProgressMessage) {
-        ms[ms.indexOf(existingProgressMessage)] = message
-        continue
-      }
-      // otherwise, insert it after its tool use
-      const toolUseMessage = toolUseMessages.find(
-        _ => _.message.content[0]?.id === message.toolUseID,
-      )
-      if (toolUseMessage) {
-        ms.splice(ms.indexOf(toolUseMessage) + 1, 0, message)
-        continue
-      }
-    }
-
-    // if it's a tool result, insert it after its tool use and progress messages
+    // if it's a tool result, insert it after its tool use message
     if (
       message.type === 'user' &&
       Array.isArray(message.message.content) &&
@@ -650,16 +643,7 @@ export function reorderMessages(
       const toolUseID = (message.message.content[0] as ToolResultBlockParam)
         ?.tool_use_id
 
-      // First check for progress messages
-      const lastProgressMessage = ms.find(
-        _ => _.type === 'progress' && _.toolUseID === toolUseID,
-      )
-      if (lastProgressMessage) {
-        ms.splice(ms.indexOf(lastProgressMessage) + 1, 0, message)
-        continue
-      }
-
-      // If no progress messages, check for tool use messages
+      // Check for tool use messages
       const toolUseMessage = toolUseMessages.find(
         _ => _.message.content[0]?.id === toolUseID,
       )
@@ -667,6 +651,9 @@ export function reorderMessages(
         ms.splice(ms.indexOf(toolUseMessage) + 1, 0, message)
         continue
       }
+      // If no corresponding tool use message found (shouldn't happen?), append at end?
+      ms.push(message);
+
     }
 
     // otherwise, just add it to the list
@@ -679,7 +666,7 @@ export function reorderMessages(
 }
 
 const getToolResultIDs = memoize(
-  (normalizedMessages: NormalizedMessage[]): { [toolUseID: string]: boolean } =>
+  (normalizedMessages: (UserMessage | AssistantMessage)[]): { [toolUseID: string]: boolean } =>
     Object.fromEntries(
       normalizedMessages.flatMap(_ =>
         _.type === 'user' && _.message.content[0]?.type === 'tool_result'
@@ -695,7 +682,7 @@ const getToolResultIDs = memoize(
 )
 
 export function getUnresolvedToolUseIDs(
-  normalizedMessages: NormalizedMessage[],
+  normalizedMessages: (UserMessage | AssistantMessage)[],
 ): Set<string> {
   const toolResults = getToolResultIDs(normalizedMessages)
   return new Set(
@@ -716,135 +703,87 @@ export function getUnresolvedToolUseIDs(
 }
 
 /**
- * Tool uses are in flight if either:
- * 1. They have a corresponding progress message and no result message
- * 2. They are the first unresoved tool use
- *
- * TODO: Find a way to harden this logic to make it more explicit
+ * Tool uses are in flight if they are unresolved.
+ * (Removed logic related to progress messages)
  */
 export function getInProgressToolUseIDs(
-  normalizedMessages: NormalizedMessage[],
+  normalizedMessages: (UserMessage | AssistantMessage)[],
 ): Set<string> {
-  const unresolvedToolUseIDs = getUnresolvedToolUseIDs(normalizedMessages)
-  const toolUseIDsThatHaveProgressMessages = new Set(
-    normalizedMessages.filter(_ => _.type === 'progress').map(_ => _.toolUseID),
-  )
-  return new Set(
-    (
-      normalizedMessages.filter(_ => {
-        if (_.type !== 'assistant') {
-          return false
-        }
-        if (_.message.content[0]?.type !== 'tool_use') {
-          return false
-        }
-        const toolUseID = _.message.content[0].id
-        if (toolUseID === unresolvedToolUseIDs.values().next().value) {
-          return true
-        }
-
-        if (
-          toolUseIDsThatHaveProgressMessages.has(toolUseID) &&
-          unresolvedToolUseIDs.has(toolUseID)
-        ) {
-          return true
-        }
-
-        return false
-      }) as AssistantMessage[]
-    ).map(_ => (_.message.content[0]! as ToolUseBlockParam).id),
-  )
+  // Progress messages are filtered out, so in-progress is simply unresolved.
+  return getUnresolvedToolUseIDs(normalizedMessages);
 }
 
 export function getErroredToolUseMessages(
-  normalizedMessages: NormalizedMessage[],
+  normalizedMessages: (UserMessage | AssistantMessage)[],
 ): AssistantMessage[] {
   const toolResults = getToolResultIDs(normalizedMessages)
   return normalizedMessages.filter(
-    _ =>
+    (_): _ is AssistantMessage =>
       _.type === 'assistant' &&
       Array.isArray(_.message.content) &&
       _.message.content[0]?.type === 'tool_use' &&
-      _.message.content[0]?.id in toolResults &&
-      toolResults[_.message.content[0]?.id],
-  ) as AssistantMessage[]
+      toolResults[_.message.content[0]?.id] === true,
+  )
 }
 
 export function normalizeMessagesForAPI(
   messages: Message[],
 ): (UserMessage | AssistantMessage)[] {
-  const result: (UserMessage | AssistantMessage)[] = []
-  
-  // First pass: collect all tool use IDs from assistant messages
-  const toolUseIds = new Set<string>();
-  messages.forEach(message => {
-    if (message.type === 'assistant' && Array.isArray(message.message.content)) {
-      message.message.content.forEach(block => {
-        if (block.type === 'tool_use' && block.id) {
-          toolUseIds.add(block.id);
-        }
-      });
+  // Start with all messages
+  let currentMessages: Message[] = messages;
+
+  // Normalize to split content blocks and filter out progress/tool_results
+  let normalized: (UserMessage | AssistantMessage)[] = normalizeMessages(currentMessages);
+
+  // Filter out progress messages again just in case (should be redundant now)
+  normalized = normalized.filter(
+    message => message.type !== ('progress' as any), // Added type assertion for safety
+  );
+
+  // Normalize content for the API (e.g., handle image data)
+  normalized = normalized.map(message => {
+    if (
+      typeof message.message.content !== 'string' &&
+      message.message.content?.some(block => block.type === 'image')
+    ) {
+      return {
+        ...message,
+        message: {
+          ...message.message,
+          content: normalizeContentFromAPI(message.message.content),
+        },
+      } as UserMessage | AssistantMessage; // Ensure cast matches return type
     }
+    return message;
   });
-  
-  // Second pass: process messages, skipping orphaned tool results
-  messages
-    .filter(_ => _.type !== 'progress')
-    .forEach(message => {
-      switch (message.type) {
-        case 'user': {
-          // Skip orphaned tool results (those without a corresponding tool use request)
-          if (
-            Array.isArray(message.message.content) &&
-            message.message.content[0]?.type === 'tool_result'
-          ) {
-            const toolUseId = message.message.content[0].tool_use_id;
-            // Skip this message if it's a tool result without a corresponding tool use
-            if (!toolUseIds.has(toolUseId)) {
-              return;
-            }
-          }
 
-          // If the current message is not a tool result, add it to the result
-          if (
-            !Array.isArray(message.message.content) ||
-            message.message.content[0]?.type !== 'tool_result'
-          ) {
-            result.push(message)
-            return
-          }
+  // Reorder messages (ensure reorderMessages handles the UserMessage | AssistantMessage type)
+  normalized = reorderMessages(normalized);
 
-          // If the last message is not a tool result, add it to the result
-          const lastMessage = last(result)
-          if (
-            !lastMessage ||
-            lastMessage?.type === 'assistant' ||
-            !Array.isArray(lastMessage.message.content) ||
-            lastMessage.message.content[0]?.type !== 'tool_result'
-          ) {
-            result.push(message)
-            return
-          }
+  // Filter out system messages if present (unlikely in this context but for safety)
+  normalized = normalized.filter(
+    message => message.message.role !== 'system'
+  );
 
-          // Otherwise, merge the current message with the last message
-          result[result.indexOf(lastMessage)] = {
-            ...lastMessage,
-            message: {
-              ...lastMessage.message,
-              content: [
-                ...lastMessage.message.content,
-                ...message.message.content,
-              ],
-            },
-          }
-          return
-        }
-        case 'assistant':
-          result.push(message)
-          return
+  // Filter out consecutive user messages (keep only the last one)
+  normalized = normalized.reduceRight<(UserMessage | AssistantMessage)[]>(
+    (acc, message, index, arr) => {
+      if (
+        message.message.role === 'user' &&
+        index > 0 &&
+        arr[index - 1]?.message.role === 'user'
+      ) {
+        // Skip this user message if the previous one was also a user message
+        return acc;
       }
-    })
-  return result
+      // Otherwise, add the message to the beginning of the accumulator
+      acc.unshift(message);
+      return acc;
+    },
+    [],
+  );
+
+  return normalized;
 }
 
 // Sometimes the API returns empty messages (eg. "\n\n"). We need to filter these out,

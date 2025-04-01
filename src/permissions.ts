@@ -1,5 +1,5 @@
 import type { CanUseToolFn } from './hooks/useCanUseTool'
-import { Tool, ToolUseContext } from './core/tools/types'
+import { Tool } from './core/tools'
 import { BashTool } from './core/tools/shell'
 import { FileEditTool } from './core/tools/filesystem'
 import { FileWriteTool } from './core/tools/filesystem'
@@ -15,6 +15,7 @@ import { grantWritePermissionForOriginalDir } from './utils/permissions/filesyst
 import { getCwd } from './utils/state'
 import { PRODUCT_NAME } from './core/constants/product'
 import { renderToolUseMessage } from './cli/renderers/toolRenderers'
+import { PermissionHandlerContext } from './core/permissions/IPermissionHandler'
 
 // Commands that are known to be safe for execution
 const SAFE_COMMANDS = new Set([
@@ -63,7 +64,7 @@ export const bashToolCommandHasPermission = (
 export const bashToolHasPermission = async (
   tool: Tool,
   command: string,
-  context: ToolUseContext,
+  context: PermissionHandlerContext,
   allowedTools: string[],
   getCommandSubcommandPrefixFn = getCommandSubcommandPrefix,
 ): Promise<PermissionResult> => {
@@ -81,9 +82,9 @@ export const bashToolHasPermission = async (
   })
   const commandSubcommandPrefix = await getCommandSubcommandPrefixFn(
     command,
-    context.abortController.signal,
+    context.abortSignal,
   )
-  if (context.abortController.signal.aborted) {
+  if (context.abortSignal.aborted) {
     throw new AbortError()
   }
 
@@ -156,7 +157,7 @@ type PermissionResult = { result: true } | { result: false; message: string }
 export const hasPermissionsToUseTool: CanUseToolFn = async (
   tool,
   input,
-  context,
+  context: PermissionHandlerContext,
   _assistantMessage,
 ): Promise<PermissionResult> => {
   // If permissions are being skipped, allow all tools
@@ -164,7 +165,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     return { result: true }
   }
 
-  if (context.abortController.signal.aborted) {
+  if (context.abortSignal.aborted) {
     throw new AbortError()
   }
 
@@ -181,44 +182,41 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   const projectConfig = getCurrentProjectConfig()
   const allowedTools = projectConfig.allowedTools ?? []
   // Special case for BashTool to allow blanket commands without exposing them in the UI
-  if (tool === BashTool && allowedTools.includes(BashTool.name)) {
+  if (tool.name === 'Bash' && allowedTools.includes(BashTool.name)) {
     return { result: true }
   }
 
   // TODO: Move this into tool definitions (done for read tools!)
-  switch (tool) {
-    // For bash tool, check each sub-command's permissions separately
-    case BashTool: {
-      // The types have already been validated by the tool,
-      // so we can safely parse the input (as opposed to safeParse).
-      const { command } = inputSchema.parse(input)
-      return await bashToolHasPermission(tool, command, context, allowedTools)
+  // Use if/else if based on tool.name instead of switch
+  // For bash tool, check each sub-command's permissions separately
+  if (tool.name === 'Bash') {
+    // The types have already been validated by the tool,
+    // so we can safely parse the input (as opposed to safeParse).
+    const { command } = tool.inputSchema.parse(input)
+    return await bashToolHasPermission(tool, command, context, allowedTools)
+  }
+  // For file editing tools, check session-only permissions
+  else if (tool.name === 'FileEdit' || tool.name === 'FileWrite' || tool.name === 'NotebookEdit') {
+    // The types have already been validated by the tool,
+    // so we can safely pass this in
+    if (!tool.needsPermissions || !tool.needsPermissions(input)) {
+      return { result: true }
     }
-    // For file editing tools, check session-only permissions
-    case FileEditTool:
-    case FileWriteTool:
-    case NotebookEditTool: {
-      // The types have already been validated by the tool,
-      // so we can safely pass this in
-      if (!tool.needsPermissions(input)) {
-        return { result: true }
-      }
-      return {
-        result: false,
-        message: `${PRODUCT_NAME} requested permissions to use ${tool.name}, but you haven't granted it yet.`,
-      }
+    return {
+      result: false,
+      message: `${PRODUCT_NAME} requested permissions to use ${tool.name}, but you haven't granted it yet.`,
     }
-    // For other tools, check persistent permissions
-    default: {
-      const permissionKey = getPermissionKey(tool, input, null)
-      if (allowedTools.includes(permissionKey)) {
-        return { result: true }
-      }
+  }
+  // For other tools, check persistent permissions
+  else {
+    const permissionKey = getPermissionKey(tool, input, null)
+    if (allowedTools.includes(permissionKey)) {
+      return { result: true }
+    }
 
-      return {
-        result: false,
-        message: `${PRODUCT_NAME} requested permissions to use ${tool.name}, but you haven't granted it yet.`,
-      }
+    return {
+      result: false,
+      message: `${PRODUCT_NAME} requested permissions to use ${tool.name}, but you haven't granted it yet.`,
     }
   }
 }
@@ -232,9 +230,9 @@ export async function savePermission(
 
   // For file editing tools, store write permissions only in memory
   if (
-    tool === FileEditTool ||
-    tool === FileWriteTool ||
-    tool === NotebookEditTool
+    tool.name === 'FileEdit' ||
+    tool.name === 'FileWrite' ||
+    tool.name === 'NotebookEdit'
   ) {
     grantWritePermissionForOriginalDir()
     return
@@ -257,13 +255,15 @@ function getPermissionKey(
   input: { [k: string]: unknown },
   prefix: string | null,
 ): string {
-  switch (tool) {
-    case BashTool:
-      if (prefix) {
-        return `${BashTool.name}(${prefix}:*)`
-      }
-      return `${BashTool.name}(${renderToolUseMessage('Bash', input, false)})`
-    default:
-      return tool.name
+  // Use if/else based on name
+  if (tool.name === 'Bash') {
+    if (prefix) {
+      return `${BashTool.name}(${prefix}:*)`
+    }
+    // Ensure renderToolUseMessage can handle generic Tool input if necessary
+    return `${tool.name}(${renderToolUseMessage('Bash', input, false)})`
+  }
+  else {
+    return tool.name
   }
 }

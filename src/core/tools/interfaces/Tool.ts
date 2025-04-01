@@ -13,6 +13,7 @@ export interface ToolUseContext {
   uuid: string;
   messageUuid: string;
   cwd: string;
+  abortSignal: AbortSignal;
   auth?: {
     apiToken?: string;
   };

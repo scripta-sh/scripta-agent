@@ -67,7 +67,7 @@ export class CoreAgentTool extends BaseTool {
   async *call(
     { prompt }: AgentToolInput,
     {
-      abortController,
+      abortSignal,
       options: {
         dangerouslySkipPermissions = false,
         forkNumber,
@@ -109,7 +109,7 @@ export class CoreAgentTool extends BaseTool {
       context,
       hasPermissionsToUseTool,
       {
-        abortController,
+        abortSignal: abortSignal,
         options: {
           dangerouslySkipPermissions,
           forkNumber,

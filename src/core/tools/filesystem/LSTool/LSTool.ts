@@ -62,13 +62,13 @@ export class CoreLSTool extends BaseTool {
 
   async *call(
     { path, ignore }: LSToolInput, 
-    { abortController }: ToolUseContext
+    { abortSignal }: ToolUseContext 
   ) {
     const fullFilePath = isAbsolute(path) ? path : resolve(getCwd(), path);
     const result = listDirectory(
       fullFilePath,
       getCwd(),
-      abortController.signal,
+      abortSignal, 
     ).sort();
     
     // Plain tree for user display

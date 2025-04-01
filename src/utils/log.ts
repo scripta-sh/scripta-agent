@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, appendFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { writeFileSync, readFileSync } from 'fs'
 import { captureException } from '../services/sentry'
@@ -15,92 +15,55 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export function createComponentLogger(componentName: string) {
   // Determine if we're in a CLI environment
-  const isCLI = process.stdout?.isTTY || false;
+  // const isCLI = process.stdout?.isTTY || false; // No longer needed for console formatting
+
+  // Helper to format the log entry for file
+  const formatLogEntry = (level: LogLevel, message: string, data?: any): string => {
+    const timestamp = new Date().toISOString();
+    let logString = `[${timestamp}] [${level.toUpperCase()}] [${componentName}] ${message}`;
+    if (data !== undefined) {
+      try {
+        logString += ` | Data: ${JSON.stringify(data)}`;
+      } catch {
+        logString += ` | Data: [Unserializable]`;
+      }
+    }
+    return logString;
+  };
 
   return {
     debug: (message: string, data?: any) => {
-      const prefix = `[${componentName}]`;
-      const formattedPrefix = isCLI ? chalk.gray(prefix) : prefix;
-      
-      // If in CLI mode, apply gray formatting to the entire message, not just the prefix
-      if (isCLI) {
-        // For large data objects/long messages, format them differently to maintain readability 
-        if (data) {
-          if (typeof data === 'string' && data.length > 100) {
-            // For long text data, format both message and data in gray
-            console.debug(formattedPrefix, chalk.gray(message), '\n', chalk.gray(data));
-          } else if (typeof data === 'object') {
-            // For objects, format message in gray but keep object unformatted for readability
-            console.debug(formattedPrefix, chalk.gray(message), data);
-          } else {
-            // For simple data, format both in gray
-            console.debug(formattedPrefix, chalk.gray(message), chalk.gray(String(data)));
-          }
-        } else {
-          // Simple message with no data - format it all in gray
-          console.debug(formattedPrefix, chalk.gray(message));
-        }
-      } else {
-        // Non-CLI environment - no formatting
-        if (data) {
-          console.debug(prefix, message, data);
-        } else {
-          console.debug(prefix, message);
-        }
-      }
+      const logLine = formatLogEntry('debug', message, data);
+      appendToGeneralLog(logLine);
+      // --- Console Logging Removed ---
     },
     
     info: (message: string, data?: any) => {
-      const prefix = `[${componentName}]`;
-      const formattedPrefix = isCLI ? chalk.blue(prefix) : prefix;
-      
-      if (isCLI) {
-        if (data) {
-          console.info(formattedPrefix, chalk.blue(message), data);
-        } else {
-          console.info(formattedPrefix, chalk.blue(message));
-        }
-      } else {
-        if (data) {
-          console.info(prefix, message, data);
-        } else {
-          console.info(prefix, message);
-        }
-      }
+      const logLine = formatLogEntry('info', message, data);
+      appendToGeneralLog(logLine);
+      // --- Console Logging Removed ---
     },
     
     warn: (message: string, data?: any) => {
-      const prefix = `[${componentName}]`;
-      const formattedPrefix = isCLI ? chalk.yellow(prefix) : prefix;
-      
-      if (isCLI) {
-        if (data) {
-          console.warn(formattedPrefix, chalk.yellow(message), data);
-        } else {
-          console.warn(formattedPrefix, chalk.yellow(message));
-        }
-      } else {
-        if (data) {
-          console.warn(prefix, message, data);
-        } else {
-          console.warn(prefix, message);
-        }
-      }
+      const logLine = formatLogEntry('warn', message, data);
+      appendToGeneralLog(logLine);
+      // --- Console Logging Removed ---
     },
     
     error: (message: string, error?: unknown) => {
-      const prefix = `[${componentName}]`;
-      const formattedPrefix = isCLI ? chalk.red(prefix) : prefix;
+      const errorString = error instanceof Error ? error.stack || error.message : String(error);
+      const logLine = formatLogEntry('error', message, error ? `\\n${errorString}` : undefined);
+      appendToGeneralLog(logLine);
+
+      // --- Console Logging Removed (Rely on logError below) ---
       
-      if (isCLI) {
-        console.error(formattedPrefix, chalk.red(message));
-      } else {
-        console.error(prefix, message);
-      }
-      
+      // Keep call to logError for Sentry and errors.txt logging
       if (error) {
-        console.error(error);
         logError(error);
+      }
+      // If you need to log the message itself as an error when no error object is present:
+      else {
+        logError(message);
       }
     }
   };
@@ -116,15 +79,26 @@ export const SESSION_ID = randomUUID()
 
 const paths = envPaths(PRODUCT_COMMAND)
 
+// --- Dynamic Log Path --- 
+const isProduction = process.env.NODE_ENV === 'production';
+// Use workspace '.logs' directory in dev, system cache in prod
+const logRootPath = isProduction ? paths.cache : process.cwd(); 
+// Use project-specific subdir in prod cache, just '.logs' in dev workspace
+const logSubDir = isProduction ? getProjectDir(process.cwd()) : '.logs';
+// Combine to get the base directory for all logs for this run
+const baseLogDirPath = join(logRootPath, logSubDir);
+// --- End Dynamic Log Path ---
+
 function getProjectDir(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
 export const CACHE_PATHS = {
-  errors: () => join(paths.cache, getProjectDir(process.cwd()), 'errors'),
-  messages: () => join(paths.cache, getProjectDir(process.cwd()), 'messages'),
-  mcpLogs: (serverName: string) =>
-    join(paths.cache, getProjectDir(process.cwd()), `mcp-logs-${serverName}`),
+  // Use the dynamically determined baseLogDirPath
+  errors: () => join(baseLogDirPath, 'errors'),
+  messages: () => join(baseLogDirPath, 'messages'),
+  logs: () => join(baseLogDirPath, 'general'), // Directory for general logs
+  mcpLogs: (serverName: string) => join(baseLogDirPath, `mcp-logs-${serverName}`),
 }
 
 export function dateToFilename(date: Date): string {
@@ -132,9 +106,15 @@ export function dateToFilename(date: Date): string {
 }
 
 const DATE = dateToFilename(new Date())
+const LOG_FILENAME = `${DATE}-${SESSION_ID}.log` // Use session ID for uniqueness
 
 function getErrorsPath(): string {
   return join(CACHE_PATHS.errors(), DATE + '.txt')
+}
+
+// Add function to get the general log file path
+function getGeneralLogPath(): string {
+  return join(CACHE_PATHS.logs(), LOG_FILENAME);
 }
 
 export function getMessagesPath(
@@ -476,5 +456,26 @@ export function logMCPError(serverName: string, error: unknown): void {
     writeFileSync(logFile, JSON.stringify(messages, null, 2), 'utf8')
   } catch {
     // Silently fail
+  }
+}
+
+// Add function to append a simple string line to the general log file
+function appendToGeneralLog(logLine: string): void {
+  // Optionally skip in certain environments if desired
+  // if (process.env.USER_TYPE === 'external' || process.env.NODE_ENV === 'test') {
+  //   return;
+  // }
+
+  try {
+    const path = getGeneralLogPath();
+    const dir = dirname(path);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    // Append the line with a newline character
+    appendFileSync(path, logLine + '\n', 'utf8');
+  } catch (error) {
+    // Log error to console if file logging fails, to avoid infinite loops
+    console.error('[LoggerSetup] Failed to write to general log file:', error);
   }
 }
