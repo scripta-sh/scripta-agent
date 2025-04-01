@@ -1,5 +1,5 @@
 import { Command } from '../commands'
-import { Bug } from '../components/Bug'
+import { Bug } from '../cli/components/Bug'
 import * as React from 'react'
 import { PRODUCT_NAME } from '../core/constants/product'
 

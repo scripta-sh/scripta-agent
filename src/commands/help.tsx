@@ -1,5 +1,5 @@
 import { Command } from '../commands'
-import { Help } from '../components/Help'
+import { Help } from '../cli/components/Help'
 import * as React from 'react'
 
 const help = {

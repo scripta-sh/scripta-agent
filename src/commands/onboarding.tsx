@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { Command } from '../commands'
-import { Onboarding } from '../components/Onboarding'
+import { Onboarding } from '../cli/components/Onboarding'
 import { clearTerminal } from '../utils/terminal'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config'
 import { clearConversation } from './clear'

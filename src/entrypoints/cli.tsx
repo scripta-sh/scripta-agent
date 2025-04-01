@@ -22,7 +22,7 @@ import { hasPermissionsToUseTool } from '../permissions'
 // Legacy tool import removed
 import { getEnabledTools } from '../core/tools/registry'
 import { initializeCore } from '../core/initialization'
-import { initializeToolRenderers } from '../components/tools/initRenderers'
+import { initializeToolRenderers } from '../cli/components/tools/initRenderers'
 import {
   getGlobalConfig,
   getCurrentProjectConfig,
@@ -38,9 +38,9 @@ import {
 } from '../utils/config.js'
 import { cwd } from 'process'
 import { dateToFilename, logError, parseLogFilename } from '../utils/log'
-import { Onboarding } from '../components/Onboarding'
+import { Onboarding } from '../cli/components/Onboarding'
 import { Doctor } from '../screens/Doctor'
-import { TrustDialog } from '../components/TrustDialog'
+import { TrustDialog } from '../cli/components/TrustDialog'
 import { checkHasTrustDialogAccepted } from '../utils/config'
 import { isDefaultSlowAndCapableModel } from '../utils/model'
 import { LogList } from '../screens/LogList'
@@ -79,7 +79,7 @@ import { CACHE_PATHS } from '../utils/log'
 import { PersistentShell } from '../utils/PersistentShell'
 import { GATE_USE_EXTERNAL_UPDATER } from '../core/constants/betas'
 import { clearTerminal } from '../utils/terminal'
-import { showInvalidConfigDialog } from '../components/InvalidConfigDialog'
+import { showInvalidConfigDialog } from '../cli/components/InvalidConfigDialog'
 import { ConfigParseError } from '../utils/errors'
 import { grantReadPermissionForOriginalDir } from '../utils/permissions/filesystem'
 import { MACRO } from '../core/constants/macros'
@@ -91,7 +91,7 @@ import { MACRO } from '../core/constants/macros'
 // import { ExitError } from '../screens/REPL'
 // import { setUpProjectConfigIfNeeded } from '../utils/project-onboarding'
 // import { CommandType } from './commands'
-// import type { Question } from '../components/Question'
+// import type { Question } from '../cli/components/Question'
 // import {
 //   grantReadPermissionForPath,
 // } from '../utils/permissions'

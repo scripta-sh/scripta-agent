@@ -1,5 +1,5 @@
 import { Command } from '../commands'
-import { Config } from '../components/Config'
+import { Config } from '../cli/components/Config'
 import * as React from 'react'
 
 const config = {

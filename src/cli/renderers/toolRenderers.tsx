@@ -2,11 +2,11 @@ import * as React from 'react';
 import { Box, Text } from 'ink';
 import { EOL } from 'os';
 import { extname, relative } from 'path';
-import { FallbackToolUseRejectedMessage } from '../../components/FallbackToolUseRejectedMessage';
-import { HighlightedCode } from '../../components/HighlightedCode';
-import { FileEditToolUpdatedMessage } from '../../components/FileEditToolUpdatedMessage';
-import { StructuredDiff } from '../../components/StructuredDiff';
-import { Cost } from '../../components/Cost';
+import { FallbackToolUseRejectedMessage } from '../components/FallbackToolUseRejectedMessage';
+import { HighlightedCode } from '../components/HighlightedCode';
+import { FileEditToolUpdatedMessage } from '../components/FileEditToolUpdatedMessage';
+import { StructuredDiff } from '../components/StructuredDiff';
+import { Cost } from '../components/Cost';
 import { getTheme } from '../../utils/theme';
 import { getCwd } from '../../utils/state';
 import { intersperse } from '../../utils/array';
@@ -24,7 +24,7 @@ import {
   renderToolResultMessage as newRenderToolResultMessage,
   renderToolUseRejectedMessage as newRenderToolUseRejectedMessage,
   OutputLine 
-} from '../../components/tools';
+} from '../components/tools';
 
 // TODO: Define proper types for the 'data' parameter for each tool's output
 // TODO: Define proper types for the 'input' parameter for each tool's input
@@ -47,7 +47,7 @@ export function renderToolUseMessage(toolName: string, input: any, verbose: bool
 // --- Rendering Tool Result Messages ---
 
 // Import the ToolResultContainer from the new location
-import { ToolResultContainer } from '../../components/tools';
+import { ToolResultContainer } from '../components/tools';
 
 /**
  * Renders the tool result message based on the tool name and data

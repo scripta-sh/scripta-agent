@@ -1,7 +1,7 @@
 import React from 'react'
 import { render } from 'ink'
-import { MCPServerMultiselectDialog } from '../components/MCPServerMultiselectDialog'
-import { MCPServerApprovalDialog } from '../components/MCPServerApprovalDialog'
+import { MCPServerMultiselectDialog } from '../cli/components/MCPServerMultiselectDialog'
+import { MCPServerApprovalDialog } from '../cli/components/MCPServerApprovalDialog'
 import { getMcprcServerStatus } from './mcpClient'
 import { getMcprcConfig } from '../utils/config'
 

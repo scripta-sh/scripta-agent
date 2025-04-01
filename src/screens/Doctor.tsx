@@ -12,7 +12,7 @@ import {
 import { saveGlobalConfig, getGlobalConfig } from '../utils/config'
 import { logEvent } from '../services/statsig'
 import { PRODUCT_NAME } from '../core/constants/product'
-import { PressEnterToContinue } from '../components/PressEnterToContinue'
+import { PressEnterToContinue } from '../cli/components/PressEnterToContinue'
 
 type Props = {
   onDone: () => void

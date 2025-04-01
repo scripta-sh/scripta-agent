@@ -6,7 +6,7 @@ import {
   savePermission,
   bashToolHasPermission,
 } from '../../permissions';
-import { ToolUseConfirm } from '../../components/permissions/PermissionRequest';
+import { ToolUseConfirm } from '../components/permissions/PermissionRequest';
 import { AssistantMessage } from '../../core/agent';
 import { logEvent } from '../../services/statsig';
 import { REJECT_MESSAGE } from '../../utils/messages';

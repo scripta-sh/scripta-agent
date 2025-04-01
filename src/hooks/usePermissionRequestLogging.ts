@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { logEvent } from '../services/statsig'
 import { logUnaryEvent, CompletionType } from '../utils/unaryLogging'
-import { ToolUseConfirm } from '../components/permissions/PermissionRequest'
+import { ToolUseConfirm } from '../cli/components/permissions/PermissionRequest'
 import { env } from '../utils/env'
 
 export type UnaryEvent = {

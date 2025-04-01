@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { Command } from '../commands'
-import { ConsoleOAuthFlow } from '../components/ConsoleOAuthFlow'
+import { ConsoleOAuthFlow } from '../cli/components/ConsoleOAuthFlow'
 import { clearTerminal } from '../utils/terminal'
 import { isLoggedInToAnthropic } from '../utils/auth'
 import { useExitOnCtrlCD } from '../hooks/useExitOnCtrlCD'

@@ -8,7 +8,7 @@ import { REJECT_MESSAGE } from '../utils/messages'
 import type { Tool as ToolType } from '../core/tools'
 import { PermissionHandlerContext } from '../core/permissions/IPermissionHandler'
 import { AssistantMessage } from '../core/agent'
-import { ToolUseConfirm } from '../components/permissions/PermissionRequest'
+import { ToolUseConfirm } from '../cli/components/permissions/PermissionRequest'
 import { AbortError } from '../utils/errors'
 import { logError } from '../utils/log'
 

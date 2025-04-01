@@ -7,7 +7,7 @@ import { BashTool } from '../tools/shell';
 import type { Tool } from '../tools/types';
 import { getCwd } from '../../utils/state';
 import { UserMessage, AssistantMessage, BinaryFeedbackResult, ToolUseContext } from './types';
-import { shouldUseBinaryFeedback, messagePairValidForBinaryFeedback } from '../../components/binary-feedback/utils';
+import { shouldUseBinaryFeedback, messagePairValidForBinaryFeedback } from '../../cli/components/binary-feedback/utils';
 
 /**
  * Normalizes tool input based on tool type

@@ -1,6 +1,6 @@
 import React from 'react'
 import { render } from 'ink'
-import { ModelSelector } from '../components/ModelSelector'
+import { ModelSelector } from '../cli/components/ModelSelector'
 import { enableConfigs } from '../utils/config'
 
 export const help = 'Change your AI provider and model settings'
