@@ -1,6 +1,6 @@
 import { registerToolRenderer, registerCategoryRenderer } from './getToolRenderer';
 import { BashToolRenderer } from './renderers/BashToolRenderer';
-import { ToolCategories } from '../../../core/tools/registry';
+import { ToolCategories } from '@core/tools/registry';
 import { DefaultToolRenderer } from './renderers/DefaultToolRenderer';
 
 /**

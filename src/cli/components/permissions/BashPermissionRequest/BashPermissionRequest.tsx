@@ -2,7 +2,7 @@ import { Box, Text } from 'ink'
 import React, { useMemo } from 'react'
 import { UnaryEvent } from '../../../../hooks/usePermissionRequestLogging'
 import { savePermission } from '../../../../permissions'
-import { BashTool } from '../../../../core/tools/shell'
+import { BashTool } from '@core/tools/shell'
 import { getTheme } from '../../../../utils/theme'
 import { usePermissionRequestLogging } from '../hooks'
 import {

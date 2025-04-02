@@ -13,7 +13,7 @@ import { hasPermissionsToUseTool } from '../permissions'
 import { setCwd } from '../utils/state'
 import { getSlowAndCapableModel } from '../utils/model'
 import { logError } from '../utils/log'
-import { initializeCore } from '../core/initialization'
+import { initializeCore } from '@core/initialization'
 import { 
   AgentTool, 
   LSTool, 
@@ -30,7 +30,7 @@ import {
 import { Command } from '../commands'
 import review from '../commands/review'
 import { lastX } from '../utils/generators'
-import { MACRO } from '../core/constants/macros'
+import { MACRO } from '@core/constants/macros'
 type ToolInput = z.infer<typeof ToolSchema.shape.inputSchema>
 
 const state: {

@@ -14,13 +14,13 @@ import { useTerminalSize } from '../../hooks/useTerminalSize'
 import { getAnthropicApiKey, getGlobalConfig } from '../../utils/config'
 import { USER_AGENT } from '../../utils/http'
 import { logEvent } from '../../services/statsig'
-import { PRODUCT_NAME } from '../../core/constants/product'
-import { llmService } from '../../core/providers'
-import { API_ERROR_MESSAGE_PREFIX } from '../../core/constants/providerErrors'
+import { PRODUCT_NAME } from '@core/constants/product'
+import { llmService } from '@core/providers'
+import { API_ERROR_MESSAGE_PREFIX } from '@core/constants/providerErrors'
 import { openBrowser } from '../../utils/browser'
 import { useExitOnCtrlCD } from '../../hooks/useExitOnCtrlCD'
-import { MACRO } from '../../core/constants/macros'
-import { GITHUB_ISSUES_REPO_URL } from '../../core/constants/product'
+import { MACRO } from '@core/constants/macros'
+import { GITHUB_ISSUES_REPO_URL } from '@core/constants/product'
 
 type Props = {
   onDone(result: string): void

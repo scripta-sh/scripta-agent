@@ -3,7 +3,7 @@ import { Box, Text, useInput } from 'ink'
 import { getTheme } from '../../utils/theme'
 import { Select } from './CustomSelect/select'
 import { Newline } from 'ink'
-import { PRODUCT_NAME } from '../../core/constants/product'
+import { PRODUCT_NAME } from '@core/constants/product'
 import { useExitOnCtrlCD } from '../../hooks/useExitOnCtrlCD'
 import {
   getGlobalConfig,
@@ -11,7 +11,7 @@ import {
   addApiKey,
   ProviderType,
 } from '../../utils/config.js'
-import models, { providers } from '../../core/constants/models'
+import models, { providers } from '@core/constants/models'
 import TextInput from './TextInput'
 import OpenAI from 'openai'
 import chalk from 'chalk'

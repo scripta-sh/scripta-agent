@@ -1,7 +1,7 @@
 import { useInput } from 'ink'
 import { ToolUseConfirm } from '../cli/components/permissions/PermissionRequest'
 import { logEvent } from '../services/statsig'
-import { BinaryFeedbackContext } from '../screens/REPL'
+import { BinaryFeedbackContext } from '../cli/screens/REPL'
 import type { SetToolJSXFn } from '../types/tool-ui'
 
 export function useCancelRequest(

@@ -12,7 +12,7 @@ import type { AssistantMessage } from '../../query'
 import type { BinaryFeedbackChoose } from './utils'
 import { useExitOnCtrlCD } from '../../../hooks/useExitOnCtrlCD'
 import { BinaryFeedbackChoice } from './utils'
-import { PRODUCT_NAME } from '../../../core/constants/product'
+import { PRODUCT_NAME } from '@core/constants/product'
 
 const HELP_URL = 'https://go/cli-feedback'
 

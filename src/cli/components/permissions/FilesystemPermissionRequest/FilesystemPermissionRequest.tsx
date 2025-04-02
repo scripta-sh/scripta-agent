@@ -17,14 +17,14 @@ import {
   UnaryEvent,
   usePermissionRequestLogging,
 } from '../../../../hooks/usePermissionRequestLogging.js'
-import { CoreFileEditTool as FileEditTool } from '../../../../core/tools/filesystem/FileEditTool/FileEditTool'
-import { CoreFileWriteTool as FileWriteTool } from '../../../../core/tools/filesystem/FileWriteTool/FileWriteTool'
-import { CoreGrepTool as GrepTool } from '../../../../core/tools/filesystem/GrepTool/GrepTool'
-import { CoreGlobTool as GlobTool } from '../../../../core/tools/filesystem/GlobTool/GlobTool'
-import { CoreLSTool as LSTool } from '../../../../core/tools/filesystem/LSTool/LSTool'
-import { CoreFileReadTool as FileReadTool } from '../../../../core/tools/filesystem/FileReadTool/FileReadTool'
-import { CoreNotebookEditTool as NotebookEditTool } from '../../../../core/tools/notebook/NotebookEditTool/NotebookEditTool'
-import { CoreNotebookReadTool as NotebookReadTool } from '../../../../core/tools/notebook/NotebookReadTool/NotebookReadTool'
+import { CoreFileEditTool as FileEditTool } from '@core/tools/filesystem/FileEditTool/FileEditTool'
+import { CoreFileWriteTool as FileWriteTool } from '@core/tools/filesystem/FileWriteTool/FileWriteTool'
+import { CoreGrepTool as GrepTool } from '@core/tools/filesystem/GrepTool/GrepTool'
+import { CoreGlobTool as GlobTool } from '@core/tools/filesystem/GlobTool/GlobTool'
+import { CoreLSTool as LSTool } from '@core/tools/filesystem/LSTool/LSTool'
+import { CoreFileReadTool as FileReadTool } from '@core/tools/filesystem/FileReadTool/FileReadTool'
+import { CoreNotebookEditTool as NotebookEditTool } from '@core/tools/notebook/NotebookEditTool/NotebookEditTool'
+import { CoreNotebookReadTool as NotebookReadTool } from '@core/tools/notebook/NotebookReadTool/NotebookReadTool'
 import { FallbackPermissionRequest } from '../FallbackPermissionRequest'
 import {
   grantWritePermissionForOriginalDir,

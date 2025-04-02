@@ -9,7 +9,7 @@ import {
   getBinaryFeedbackResultForChoice,
   logBinaryFeedbackEvent,
 } from './utils.js'
-import { PRODUCT_NAME } from '../../../core/constants/product'
+import { PRODUCT_NAME } from '@core/constants/product'
 
 type Props = {
   m1: AssistantMessage

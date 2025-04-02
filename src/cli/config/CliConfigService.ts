@@ -1,4 +1,4 @@
-import { IConfigService } from '../../core/config/IConfigService';
+import { IConfigService } from '@core/config/IConfigService';
 import {
     getGlobalConfig as getGlobalConfigCli,
     saveGlobalConfig as saveGlobalConfigCli,

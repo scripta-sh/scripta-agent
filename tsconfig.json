@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "NodeNext",
     "lib": [
       "ES2022",
       "DOM",
@@ -21,11 +21,11 @@
     "jsx": "react",
     "declaration": false,
     "sourceMap": true,
-    "baseUrl": ".",
+    "baseUrl": "./src",
     "paths": {
-      "*": ["node_modules/*", "src/types/*", "src/*"]
+      "@core/*": ["core/*"]
     },
-    "types": ["node", "jest"],
+    "types": [],
     "allowSyntheticDefaultImports": true,
     "noEmitOnError": false,
     "ignoreDeprecations": "5.0",

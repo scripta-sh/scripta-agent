@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { PRODUCT_NAME } from '../../core/constants/product'
+import { PRODUCT_NAME } from '@core/constants/product'
 import { Box, Newline, Text, useInput } from 'ink'
 import {
   getGlobalConfig,

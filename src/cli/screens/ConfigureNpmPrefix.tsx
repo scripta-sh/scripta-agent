@@ -4,12 +4,12 @@ import { Select } from '@inkjs/ui'
 import TextInput from '../components/TextInput'
 import { SimpleSpinner } from '../components/Spinner'
 import { getTheme } from '../../utils/theme'
-import { useTerminalSize } from '../hooks/useTerminalSize'
-import { PRODUCT_NAME } from '../../core/constants/product'
+import { useTerminalSize } from '../../hooks/useTerminalSize'
+import { PRODUCT_NAME } from '@core/constants/product'
 import { setupNewPrefix, installGlobalPackage } from '../../utils/autoUpdater'
 import { logError } from '../../utils/log'
 import { logEvent } from '../../services/statsig'
-import { MACRO } from '../../core/constants/macros'
+import { MACRO } from '@core/constants/macros'
 type Props = {
   customPrefix: string
   onCustomPrefixChange: (value: string) => void

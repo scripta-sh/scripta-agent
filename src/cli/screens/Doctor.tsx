@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { Select } from '@inkjs/ui'
 import { getTheme } from '../../utils/theme'
-import { ConfigureNpmPrefix } from './ConfigureNpmPrefix.js'
+import { ConfigureNpmPrefix } from './ConfigureNpmPrefix'
 import { platform } from 'process'
 import {
   checkNpmPermissions,
@@ -11,8 +11,8 @@ import {
 } from '../../utils/autoUpdater.js'
 import { saveGlobalConfig, getGlobalConfig } from '../../utils/config'
 import { logEvent } from '../../services/statsig'
-import { PRODUCT_NAME } from '../../core/constants/product'
-import { PressEnterToContinue } from '../components/PressEnterToContinue.js'
+import { PRODUCT_NAME } from '@core/constants/product'
+import { PressEnterToContinue } from '../components/PressEnterToContinue'
 
 type Props = {
   onDone: () => void

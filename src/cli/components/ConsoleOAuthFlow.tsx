@@ -10,7 +10,7 @@ import { logError } from '../../utils/log'
 import { clearTerminal } from '../../utils/terminal'
 import { SimpleSpinner } from './Spinner'
 import { WelcomeBox } from './Onboarding'
-import { PRODUCT_NAME } from '../../core/constants/product'
+import { PRODUCT_NAME } from '@core/constants/product'
 import { sendNotification } from '../../services/notifier'
 
 type Props = {

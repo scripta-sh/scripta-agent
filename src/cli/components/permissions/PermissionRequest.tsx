@@ -1,7 +1,7 @@
 import { useInput } from 'ink'
 import * as React from 'react'
 import { AssistantMessage } from '../../query'
-import { Tool, FileEditTool, FileWriteTool, BashTool } from '../../../core/tools'
+import { Tool, FileEditTool, FileWriteTool, BashTool } from '@core/tools'
 import { FileEditPermissionRequest } from './FileEditPermissionRequest/FileEditPermissionRequest'
 import { BashPermissionRequest } from './BashPermissionRequest/BashPermissionRequest'
 import { FallbackPermissionRequest } from './FallbackPermissionRequest'
@@ -17,7 +17,7 @@ import {
   FileReadTool,
   NotebookReadTool
 } from '../../../core/tools'
-import { PRODUCT_NAME } from '../../../core/constants/product'
+import { PRODUCT_NAME } from '@core/constants/product'
 
 function permissionComponentForTool(tool: Tool) {
   switch (tool) {

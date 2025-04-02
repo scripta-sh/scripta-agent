@@ -1,11 +1,11 @@
-import { FileEditTool, FileWriteTool } from '../../../core/tools'
+import { FileEditTool, FileWriteTool } from '@core/tools'
 import { FileEditToolDiff } from '../permissions/FileEditPermissionRequest/FileEditToolDiff'
 import { Message } from '../Message'
 import {
   normalizeMessages,
   type NormalizedMessage,
 } from '../../../utils/messages.js'
-import type { Tool } from '../../../core/tools'
+import type { Tool } from '@core/tools'
 import { useTerminalSize } from '../../../hooks/useTerminalSize'
 import { FileWriteToolDiff } from '../permissions/FileWritePermissionRequest/FileWriteToolDiff'
 import type { AssistantMessage } from '../../query'

@@ -1,8 +1,8 @@
-import { Message } from '../../core/agent';
+import { Message } from '@core/agent';
 import {
 	ISessionManager,
 	SessionState,
-} from '../../core/session/ISessionManager';
+} from '@core/session/ISessionManager';
 import {
 	getMessagesGetter,
 	getMessagesSetter,
@@ -10,8 +10,8 @@ import {
 import { getHistory as getCliHistory, addToHistory as addToCliHistory } from '../../history';
 import { getCwd as getCliCwd, setCwd as setCliCwd } from '../../utils/state';
 import { getGlobalConfig, GlobalConfig } from '../../utils/config'; // Use getGlobalConfig
-import { Tool } from '../../core/tools/interfaces/Tool'; // Import Tool from core
-import { getEnabledTools } from '../../core/tools/registry'; // Import registry function
+import { Tool } from '@core/tools/interfaces/Tool'; // Import Tool from core
+import { getEnabledTools } from '@core/tools/registry'; // Import registry function
 import chalk from 'chalk';
 import { createComponentLogger } from '../../utils/log';
 

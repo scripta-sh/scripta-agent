@@ -5,7 +5,7 @@ import figures from 'figures'
 import { getTheme } from '../../utils/theme'
 import { Message as MessageComponent } from './Message'
 import { randomUUID } from 'crypto'
-import type { Tool } from '../../core/tools/types'
+import type { Tool } from '@core/tools/types'
 import {
   createUserMessage,
   isEmptyMessageText,

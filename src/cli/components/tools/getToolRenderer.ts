@@ -1,7 +1,7 @@
 import { ToolRenderer } from './ToolRenderer';
 import { DefaultToolRenderer } from './renderers/DefaultToolRenderer';
-import { getToolCategory } from '../../../core/tools';
-import { ToolCategories } from '../../../core/tools/registry';
+import { getToolCategory } from '@core/tools';
+import { ToolCategories } from '@core/tools/registry';
 
 // Registry of tool renderers by name
 const rendererRegistry: Record<string, ToolRenderer> = {};

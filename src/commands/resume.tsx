@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { Command } from '../commands'
-import { ResumeConversation } from '../screens/ResumeConversation'
+import { ResumeConversation } from '../cli/screens/ResumeConversation'
 import { render } from 'ink'
 import { CACHE_PATHS, loadLogList } from '../utils/log'
 

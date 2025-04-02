@@ -1,22 +1,22 @@
 import * as React from 'react';
-import { Tool } from '../../core/tools/interfaces/Tool';
-import { IPermissionHandler, PermissionRequest, PermissionHandlerContext } from '../../core/permissions/IPermissionHandler';
+import { Tool } from '@core/tools/interfaces/Tool';
+import { IPermissionHandler, PermissionRequest, PermissionHandlerContext } from '@core/permissions/IPermissionHandler';
 import {
   hasPermissionsToUseTool,
   savePermission,
   bashToolHasPermission,
 } from '../../permissions';
 import { ToolUseConfirm } from '../components/permissions/PermissionRequest';
-import { AssistantMessage } from '../../core/agent';
+import { AssistantMessage } from '@core/agent';
 import { logEvent } from '../../services/statsig';
 import { REJECT_MESSAGE } from '../../utils/messages';
 import { getCommandSubcommandPrefix } from '../../utils/commands';
 import { AbortError } from '../../utils/errors';
 import { getGlobalConfig } from '../../utils/config';
 // Import tools from core
-import { FileEditTool } from '../../core/tools/filesystem';
-import { FileWriteTool } from '../../core/tools/filesystem';
-import { NotebookEditTool } from '../../core/tools/notebook';
+import { FileEditTool } from '@core/tools/filesystem';
+import { FileWriteTool } from '@core/tools/filesystem';
+import { NotebookEditTool } from '@core/tools/notebook';
 import { randomUUID } from 'crypto';
 import { createComponentLogger } from '../../utils/log';
 

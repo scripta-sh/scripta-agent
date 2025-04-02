@@ -10,7 +10,7 @@ import type {
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import type { Tool } from '../../core/tools/types'
+import type { Tool } from '@core/tools/types'
 import { logError } from '../../utils/log'
 import { UserToolResultMessage } from './messages/UserToolResultMessage/UserToolResultMessage'
 import { AssistantToolUseMessage } from './messages/AssistantToolUseMessage'

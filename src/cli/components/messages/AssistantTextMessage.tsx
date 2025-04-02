@@ -18,7 +18,7 @@ import {
   isEmptyMessageText,
   NO_RESPONSE_REQUESTED,
 } from '../../../utils/messages.js'
-import { BLACK_CIRCLE } from '../../../core/constants/figures'
+import { BLACK_CIRCLE } from '@core/constants/figures'
 import { applyMarkdown } from '../../../utils/markdown'
 import { useTerminalSize } from '../../../hooks/useTerminalSize'
 

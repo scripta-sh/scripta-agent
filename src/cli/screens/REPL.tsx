@@ -6,47 +6,47 @@ import ProjectOnboarding, {
 import { CostThresholdDialog } from '../components/CostThresholdDialog.js'
 import * as React from 'react'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useTerminalSize } from '../hooks/useTerminalSize'
-import { Command } from '../../commands'
+import { useTerminalSize } from '../../hooks/useTerminalSize.js'
+import { Command } from '../../commands.js'
 import { Logo } from '../components/Logo.js'
 import { Message } from '../components/Message.js'
 import { MessageResponse } from '../components/MessageResponse.js'
 import { MessageSelector } from '../components/MessageSelector.js'
 import {
   PermissionRequest,
-    ToolUseConfirm,
-  } from '../components/permissions/PermissionRequest.js'
+  ToolUseConfirm,
+} from '../components/permissions/PermissionRequest.js'
 import { PermissionRequestTitle } from '../components/permissions/PermissionRequestTitle.js'
 import PromptInput from '../components/PromptInput.js'
 import { Spinner } from '../components/Spinner.js'
-import { getSystemPrompt } from '../../core/constants/prompts.js'
-import { getContext } from '../../context'
-import { getTotalCost, useCostSummary } from '../../cost-tracker'
-import { useLogStartupTime } from '../hooks/useLogStartupTime'
-import { addToHistory } from '../../history'
-import { useCancelRequest } from '../hooks/useCancelRequest'
-import { useLogMessages } from '../hooks/useLogMessages'
-import { getTheme } from '../../utils/theme'
+import { getSystemPrompt } from '@core/constants/prompts.js'
+import { getContext } from '../../context.js'
+import { getTotalCost, useCostSummary } from '../../cost-tracker.js'
+import { useLogStartupTime } from '../../hooks/useLogStartupTime.js'
+import { addToHistory } from '../../history.js'
+import { useCancelRequest } from '../../hooks/useCancelRequest.js'
+import { useLogMessages } from '../../hooks/useLogMessages.js'
+import { getTheme } from '../../utils/theme.js'
 import { HighlightedCode } from '../components/HighlightedCode.js'
 import { StructuredDiff } from '../components/StructuredDiff.js'
-import { intersperse } from '../../utils/array'
+import { intersperse } from '../../utils/array.js'
 import { existsSync, readFileSync } from 'fs'
 import { relative, basename, extname } from 'path'
-import { getPatch } from '../../utils/diff'
-import { detectFileEncoding } from '../../utils/file'
+import { getPatch } from '../../utils/diff.js'
+import { detectFileEncoding } from '../../utils/file.js'
 import {
   type AssistantMessage,
   type BinaryFeedbackResult,
   type Message as MessageType,
   type ProgressMessage,
   type UserMessage,
-} from '../../core/agent'
-import type { WrappedClient } from '../../services/mcpClient'
-import type { Tool } from '../../core/tools'
-import { getTool, getToolOrThrow } from '../../core/tools'
-import { AutoUpdaterResult } from '../../utils/autoUpdater'
-import { logEvent } from '../../services/statsig'
-import { getNextAvailableLogForkNumber } from '../../utils/log'
+} from '../../core/agent/index.js'
+import type { WrappedClient } from '../../services/mcpClient.js'
+import type { Tool } from '@core/tools.js'
+import { getTool, getToolOrThrow } from '@core/tools.js'
+import { AutoUpdaterResult } from '../../utils/autoUpdater.js'
+import { logEvent } from '../../services/statsig.js'
+import { getNextAvailableLogForkNumber } from '../../utils/log.js'
 import {
   getErroredToolUseMessages,
   getInProgressToolUseIDs,
@@ -62,25 +62,24 @@ import {
   createAssistantAPIErrorMessage,
   createUserMessage,
 } from '../../utils/messages.js'
-import { getSlowAndCapableModel, isDefaultSlowAndCapableModel } from '../../utils/model'
-import { clearTerminal, updateTerminalTitle } from '../../utils/terminal'
+import { getSlowAndCapableModel, isDefaultSlowAndCapableModel } from '../../utils/model.js'
+import { clearTerminal, updateTerminalTitle } from '../../utils/terminal.js'
 import { BinaryFeedback } from '../components/binary-feedback/BinaryFeedback.js'
-import { getMaxThinkingTokens } from '../../utils/thinking'
-import { CliPermissionHandler } from '../permissions/CliPermissionHandler'
-import { getCwd, getOriginalCwd } from '../../utils/state'
+import { getMaxThinkingTokens } from '../../utils/thinking.js'
+import { CliPermissionHandler } from '../permissions/CliPermissionHandler.js'
+import { getCwd, getOriginalCwd } from '../../utils/state.js'
 import { getClients } from '../../services/mcpClient.js'
-import { CliConfigService } from '../config/CliConfigService'
-import { processInput } from '../../core/ScriptaCore'
-import { CoreEvent } from '../../core/agent/types'
-import { IPermissionHandler, PermissionHandlerContext } from "../../core/permissions/IPermissionHandler";
-import { ToolUseContext } from '../../core/tools/interfaces/Tool';
+import { CliConfigService } from '../config/CliConfigService.js'
+import { processInput } from '@core/ScriptaCore.js'
+import { CoreEvent } from '@core/agent/types.js'
+import { IPermissionHandler, PermissionHandlerContext } from "@core/permissions/IPermissionHandler.js";
+import { ToolUseContext } from '@core/tools/interfaces/Tool.js';
 import { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { PermissionRequest as ToolUseConfirmComponent } from '../components/permissions/PermissionRequest.js'
-import { CliSessionManager } from '../session/CliSessionManager'
-import { setMessagesGetter, setMessagesSetter } from '../../messages'
+import { CliSessionManager } from '../session/CliSessionManager.js'
+import { setMessagesGetter, setMessagesSetter } from '../../messages.js'
 import chalk from 'chalk'
-import { createComponentLogger } from '../../utils/log'
-
+import { createComponentLogger } from '../../utils/log.js'
 
 type Props = {
   commands: Command[]
@@ -164,7 +163,7 @@ export function REPL({
   const [autoUpdaterResult, setAutoUpdaterResult] =
     useState<AutoUpdaterResult | null>(null)
   // Use the new type definition
-  const [toolJSX, setToolJSX] = useState<import('../../types/tool-ui').ToolJSX | null>(null)
+  const [toolJSX, setToolJSX] = useState<import('../../types/tool-ui.js').ToolJSX | null>(null)
   const [toolUseConfirm, setToolUseConfirm] = useState<ToolUseConfirm | null>(
     null,
   )
@@ -891,7 +890,6 @@ export function REPL({
   logger.debug(`[REPL Render] State before render: isLoading=${isLoading}, toolUseConfirm=${!!toolUseConfirm}`);
 
   return (
-
       <Box flexDirection="column" flexGrow={1}>
         {/* Use the render prop function and suppress potential type error */}
         {/* @ts-ignore - Linter seems incorrect about Static prop types here */}

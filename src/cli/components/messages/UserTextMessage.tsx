@@ -3,7 +3,7 @@ import { UserBashInputMessage } from './UserBashInputMessage'
 import { UserCommandMessage } from './UserCommandMessage'
 import { UserPromptMessage } from './UserPromptMessage'
 import * as React from 'react'
-import { NO_CONTENT_MESSAGE } from '../../../core/constants/providerErrors'
+import { NO_CONTENT_MESSAGE } from '@core/constants/providerErrors'
 
 type Props = {
   addMargin: boolean
