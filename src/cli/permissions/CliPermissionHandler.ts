@@ -146,7 +146,6 @@ export class CliPermissionHandler implements IPermissionHandler {
     assistantMessage?: AssistantMessage
   ): Promise<boolean> {
     logger.debug(`Requesting permission for ${tool.name}`);
-    // Create a placeholder assistant message if one isn't provided
     const placeholderAssistantMessage: AssistantMessage = assistantMessage || {
       type: 'assistant',
       message: {
@@ -176,44 +175,17 @@ export class CliPermissionHandler implements IPermissionHandler {
       }
 
       try {
-        // Fetch description etc. (may need adjustments based on Tool structure)
         const description = tool.description && typeof tool.description === 'function'
           ? await tool.description(input)
           : tool.description ?? tool.name;
-        // commandPrefix logic might need adjustment or removal if not used
-        const commandPrefix = null; 
+        
+        let commandPrefix = null;
+        if (tool.name === 'Bash') { // Only calculate for Bash tool
+           const { command } = tool.inputSchema.parse(input); 
+           commandPrefix = await getCommandSubcommandPrefix(command, context.abortSignal);
+           if (context.abortSignal.aborted) throw new AbortError(); // Check abort after async call
+        }
 
-        /* --- COMMENT OUT SETTING THE SIMPLE PERMISSION REQUEST --- 
-        // Set the permission request using the correct interface structure
-        const userFacingName = tool.userFacingName ? tool.userFacingName(input) : tool.name;
-        logger.debug(`Setting permission request for ${userFacingName}`);
-        this.setPermissionRequest({
-          toolName: userFacingName, 
-          toolInput: input,
-          onAllow: () => {
-            logger.debug(`Permission request allowed by user`);
-            this.setPermissionRequest(null);
-            // Also clear the detailed confirm state
-            this.setToolUseConfirm(null); 
-            
-            // Save permission based on tool type (existing logic)
-            if (tool.name === 'FileWrite' || tool.name === 'FileEdit' || tool.name === 'NotebookEdit') {
-              logger.debug(`Granting filesystem permission for current request: ${tool.name}`);
-              savePermission(tool, input, null);
-            }
-            resolve(true);
-          },
-          onDeny: () => {
-            logger.debug(`Permission request denied by user`);
-            this.setPermissionRequest(null);
-            // Also clear the detailed confirm state
-            this.setToolUseConfirm(null); 
-            handleAbort();
-          }
-        });
-        */
-
-        // Set ONLY the detailed tool use confirmation state
         logger.debug(`Setting ToolUseConfirm state for ${tool.name}`);
         this.setToolUseConfirm({
           assistantMessage: placeholderAssistantMessage,

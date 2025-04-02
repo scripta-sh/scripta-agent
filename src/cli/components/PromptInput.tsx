@@ -196,7 +196,8 @@ function PromptInput({
     const abortController = new AbortController()
     setAbortController(abortController)
     const model = await getSlowAndCapableModel()
-    const messages = await processUserInput(
+
+    const returnedMessages = await processUserInput(
       finalInput,
       mode,
       setToolJSX,
@@ -218,21 +219,39 @@ function PromptInput({
       pastedImage ?? null,
     )
 
-    if (messages.length) {
-      onQuery(messages, abortController)
-    } else {
-      // Local JSX commands
-      addToHistory(input)
-      resetHistory()
-      return
-    }
+    // Check if the result indicates a prompt was generated
+    const isGeneratedPrompt = input.startsWith('/') &&
+                              returnedMessages.length > 0 &&
+                              returnedMessages[0]?.type === 'user' &&
+                              Array.isArray(returnedMessages[0]?.message?.content);
 
-    for (const message of messages) {
-      if (message.type === 'user') {
-        const inputToAdd = mode === 'bash' ? `!${input}` : input
-        addToHistory(inputToAdd)
-        resetHistory()
-      }
+    if (isGeneratedPrompt) {
+      // Log detection
+      console.log("[PromptInput] Detected generated prompt from command.");
+
+      // Directly call onQuery, assuming REPL.onQuery will be modified to handle this.
+      // onQuery is responsible for setting loading state based on core processing.
+      onQuery(returnedMessages, abortController);
+
+      // Add command to history here as onQuery might not do it for generated prompts
+      addToHistory(input);
+      resetHistory();
+
+    } else if (returnedMessages.length > 0) {
+      // Regular input or local command output - handled by onQuery
+      onQuery(returnedMessages, abortController);
+      // History for user messages likely handled within onQuery/processUserInput path
+      // Add non-user message input to history here if necessary? Typically not needed.
+      // addToHistory(input); // Maybe needed if processUserInput doesn't add history for local commands
+      // resetHistory();
+
+    } else {
+      // Local JSX command or other case handled internally (e.g., no messages returned)
+      addToHistory(input); // Add raw command to history
+      resetHistory();
+      // Ensure loading stops if processUserInput returned nothing and didn't handle UI
+      setIsLoading(false);
+      setAbortController(null);
     }
   }
 

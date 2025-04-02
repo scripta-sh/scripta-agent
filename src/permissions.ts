@@ -56,9 +56,17 @@ export const bashToolCommandHasPermission = (
 ): boolean => {
   // Check exact match first
   if (bashToolCommandHasExactMatchPermission(tool, command, allowedTools)) {
-    return true
+    return true;
   }
-  return allowedTools.includes(getPermissionKey(tool, { command }, prefix))
+  // Check prefix key
+  if (prefix && allowedTools.includes(getPermissionKey(tool, { command }, prefix))) {
+    return true;
+  }
+  // Check full command key if prefix check failed or no prefix exists
+  if (allowedTools.includes(getPermissionKey(tool, { command }, null))) {
+    return true;
+  }
+  return false; // Return false only if all checks fail
 }
 
 export const bashToolHasPermission = async (

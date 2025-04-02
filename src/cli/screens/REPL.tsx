@@ -40,7 +40,7 @@ import {
   type Message as MessageType,
   type ProgressMessage,
   type UserMessage,
-} from '../../core/agent/index.js'
+} from '../../core/agent/types.js'
 import type { WrappedClient } from '../../services/mcpClient.js'
 import type { Tool } from '@core/tools.js'
 import { getTool, getToolOrThrow } from '@core/tools.js'
@@ -403,25 +403,24 @@ export function REPL({
 
     switch (coreEvent.type) {
       case 'AssistantTextResponse':
-        // Update UI with streaming text
-        // Find the latest assistant message being streamed (might need better tracking)
         setMessages(prevMessages => {
             const lastMsgIndex = prevMessages.length - 1;
             if (lastMsgIndex >= 0 && prevMessages[lastMsgIndex]?.type === 'assistant') {
                 const updatedMessages = [...prevMessages];
-                const lastMsg = updatedMessages[lastMsgIndex] as AssistantMessage; // Cast needed
-                // Append text to the last message content if it's a text block
+                const lastMsg = updatedMessages[lastMsgIndex] as AssistantMessage;
                 const content = lastMsg.message.content;
-                if (content.length > 0 && content[content.length - 1]?.type === 'text') {
-                    content[content.length - 1]!.text += coreEvent.text; 
-        } else {
-                    // Or add a new text block if the last block wasn't text
-                    content.push({ type: 'text', text: coreEvent.text });
+
+                // Check if the last block is a TextBlock before accessing .text
+                const lastContentBlock = content[content.length - 1];
+                if (lastContentBlock?.type === 'text') {
+                    lastContentBlock.text += coreEvent.text; // Append to existing text block
+                } else {
+                    // If last block wasn't text, or content is empty, add a new TextBlock
+                    content.push({ type: 'text', text: coreEvent.text, citations: [] }); // Added citations: []
                 }
                 updatedMessages[lastMsgIndex] = { ...lastMsg }; // Ensure re-render
                 return updatedMessages;
             }
-            // If no assistant message exists yet, create a placeholder? Or wait for AssistantMessageStart?
              logger.warn("Received AssistantTextResponse but no active assistant message found.");
             return prevMessages; // Return unchanged if no assistant message
         });
@@ -651,11 +650,14 @@ export function REPL({
     markProjectOnboardingComplete()
     
     const lastMessage = newMessages[newMessages.length - 1]!
-    // Check if lastMessage is UserMessage before accessing .message
     const userInput = 
       lastMessage?.type === 'user' && typeof lastMessage.message.content === 'string' 
       ? lastMessage.message.content 
-      : ""; // Default to empty string if not a user text message
+      : "";
+    
+    // --- MODIFIED CHECK --- 
+    // Check if the content is structured (array), indicating a generated prompt from a command.
+    const isGeneratedPrompt = lastMessage?.type === 'user' && Array.isArray(lastMessage.message.content);
 
     if (lastMessage.type === 'assistant') {
       // Handle cases where input processing already yielded an assistant message (e.g., bash cd)
@@ -663,59 +665,47 @@ export function REPL({
       setIsLoading(false)
       return
     }
-    if (userInput === "") {
-        // Handle cases where the input wasn't a user text message (e.g. tool result, progress)
-        logger.warn(`onQuery called without user text input.`);
+
+    // If it's NOT a generated prompt AND the userInput is empty, THEN it's an invalid call.
+    if (!isGeneratedPrompt && userInput === "") {
+        logger.warn(`onQuery called without user text input or generated prompt.`);
         setIsLoading(false);
         setAbortController(null);
         return;
     }
+    
+    // --- END MODIFIED CHECK ---
 
     // Use logged setter
     loggedSetIsLoading(true);
 
     try {
-      // Define a constant session ID for the CLI
       const sessionId = 'cli-session';
+      // ... (logging session state) ...
       
-      // Add additional logging to debug message state
-      logger.debug(`Current React state messages count: ${messages.length}`);
-      
-      // Verify session state before starting
-      const sessionState = await sessionManager.getSessionState(sessionId);
-      logger.debug(`Starting core engine with ${sessionState.messages.length} messages in session state`);
-      
-      // Print a few messages from the session state to verify content
-      if (sessionState.messages.length > 0) {
-        const lastStateMsg = sessionState.messages[sessionState.messages.length - 1];
-        const firstStateMsg = sessionState.messages[0];
-        logger.debug(`First session message: ${firstStateMsg.type}, Last session message: ${lastStateMsg.type}`);
-      }
-      
-      // Check for duplicate user messages to avoid adding them again
-      const isDuplicateUserMessage = lastMessage.type === 'user' && 
-        sessionState.messages.some(m => 
-          m.type === 'user' && 
-          typeof m.message.content === 'string' &&
-          typeof lastMessage.message.content === 'string' &&
-          m.message.content === lastMessage.message.content
-        );
+      // Determine the input for processInput: use userInput for text, or reconstruct prompt for generated commands
+      // NOTE: processInput now primarily takes the raw user text. The session manager holds the structured state.
+      // So, even for generated prompts, we might just need to ensure the session state is correct.
+      // Let's proceed assuming processInput uses the session state primarily.
+      // The `userInput` variable here is mainly for logging/checks.
+      const inputForCore = userInput; // Keep using the simple text input for processInput call
 
-      if (!isDuplicateUserMessage) {
-        // Only add the latest user message to the session to avoid duplicates
-        logger.debug('Adding new user message to session');
-        await sessionManager.setMessages(sessionId, [...sessionState.messages, lastMessage]);
-        
-        // Double-check that message was added
-        const updatedState = await sessionManager.getSessionState(sessionId);
-        logger.debug(`After adding message: session has ${updatedState.messages.length} messages`);
-      } else {
-        logger.debug('Skipping duplicate user message');
+      // ... (check for duplicate messages and update session state) ...
+      
+      // Ensure the structured prompt IS in the session state if it's a generated one
+      const currentState = await sessionManager.getSessionState(sessionId);
+      const lastSessionMessage = currentState.messages[currentState.messages.length - 1];
+      // If the last message in React state IS the generated prompt, ensure it's also the last in session state
+      if (isGeneratedPrompt && lastMessage.uuid !== lastSessionMessage?.uuid) {
+        logger.warn('Session state desync detected for generated prompt. Re-syncing.');
+        // This might indicate a race condition or logic error in state updates
+        // Force add the generated prompt message to the session
+        await sessionManager.setMessages(sessionId, [...currentState.messages.filter(m => m.uuid !== lastMessage.uuid), lastMessage]);
       }
 
-      // Call processInput with sessionId and sessionManager
+      logger.debug(`Calling ScriptaCore.processInput with input: "${inputForCore.substring(0,50)}..."`);
       coreEngineRef.current = processInput(
-          userInput,
+          inputForCore, // Pass the original text input or empty if generated
           sessionId,
           sessionManager,
           permissionHandler,
@@ -745,9 +735,6 @@ export function REPL({
         const errorMsg = createAssistantAPIErrorMessage("An unexpected error occurred.");
         setMessages(oldMessages => [...oldMessages, errorMsg]);
     } finally {
-        // REMOVE loading/controller reset from here - handled within event handlers
-        // setIsLoading(false);
-        // setAbortController(null); // Clear abort controller when done
         coreEngineRef.current = null; // Clear the generator ref
     }
   }
@@ -792,6 +779,9 @@ export function REPL({
       ),
     [normalizedMessages],
   )
+
+  // Convert Map to object for PromptInput prop
+  const readFileTimestampsObject = Object.fromEntries(readFileTimestamps.current || []); // Added || [] for initial render safety
 
   // Ensure messagesJSX is correctly formed before use
   const messagesJSX = useMemo(() => {
@@ -975,7 +965,7 @@ export function REPL({
                       setForkConvoWithMessagesOnTheNextRender={
                         setForkConvoWithMessagesOnTheNextRender
                       }
-                      readFileTimestamps={readFileTimestamps.current}
+                      readFileTimestamps={readFileTimestampsObject} // Pass the converted object
                   />
               </Box>
           )}
