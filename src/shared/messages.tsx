@@ -5,17 +5,17 @@ import {
   ProgressMessage,
   UserMessage,
   AssistantMessage,
-} from '../core/agent'
-import { getCommand, hasCommand } from '../commands'
-import { MalformedCommandError } from './errors'
-import { logError } from './log'
+} from '../core/agent/types.js'
+import { getCommand, hasCommand } from '../commands.js'
+import { MalformedCommandError } from './errors.js'
+import { logError } from './logging/log.js'
 import { resolve } from 'path'
 import { last, memoize } from 'lodash-es'
-import { logEvent } from '../services/statsig'
+import { logEvent } from '../services/statsig.js'
 import { Command } from '../commands.js'
-import type { SetToolJSXFn } from '../types/tool-ui'
-import type { Tool, ToolUseContext } from '../core/tools'
-import { lastX } from '../utils/generators'
+import type { SetToolJSXFn } from '../types/tool-ui.js'
+import type { Tool, ToolUseContext } from '../core/tools/interfaces/Tool.js'
+import { lastX } from '../core/utils/generators.js'
 import { NO_CONTENT_MESSAGE } from '../core/constants/providerErrors.js'
 import {
   ImageBlockParam,
@@ -26,13 +26,13 @@ import {
   ContentBlockParam,
   ContentBlock,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { setCwd } from './state'
-import { getCwd } from './state'
+import { setCwd } from './config/state.js'
+import { getCwd } from './config/state.js'
 import chalk from 'chalk'
 import * as React from 'react'
-import { UserBashInputMessage } from '../cli/components/messages/UserBashInputMessage'
-import { Spinner } from '../cli/components/Spinner'
-import { BashTool } from '../core/tools'
+import { UserBashInputMessage } from '../cli/components/messages/UserBashInputMessage.js'
+import { Spinner } from '../cli/components/Spinner.js'
+import { CoreBashTool } from '../core/tools/shell/BashTool/BashTool.js'
 import { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import { getContext } from '../context.js'
 
@@ -210,13 +210,14 @@ export async function processUserInput(
       shouldHidePromptInput: false,
     })
     try {
-      const validationResult = await BashTool.validateInput({
+      const bashTool = new CoreBashTool();
+      const validationResult = await bashTool.validateInput({
         command: input,
       })
       if (!validationResult.result) {
         return [userMessage, createAssistantMessage(validationResult.message)]
       }
-      const { data } = await lastX(BashTool.call({ command: input }, context))
+      const { data } = await lastX(bashTool.call({ command: input }, context))
       return [
         userMessage,
         createAssistantMessage(
@@ -862,6 +863,8 @@ export function stripSystemMessages(content: string): string {
   const regex = new RegExp(`<(${STRIPPED_TAGS.join('|')})>.*?</\\1>\n?`, 'gs')
   return content.replace(regex, '').trim()
 }
+
+import { NormalizedMessage } from '../core/agent/types.js';
 
 export function getToolUseID(message: NormalizedMessage): string | null {
   switch (message.type) {

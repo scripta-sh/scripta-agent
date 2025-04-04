@@ -1,19 +1,19 @@
-import { BaseProvider } from './BaseProvider';
-import { LLMProviderOptions } from './ILLMProvider';
-import { Tool } from '../../Tool';
-import { UserMessage, AssistantMessage } from '../../query';
+import { BaseProvider } from './BaseProvider.js';
+import { LLMProviderOptions } from './ILLMProvider.js';
+import { Tool } from '../tools/interfaces/Tool.js';
+import { UserMessage, AssistantMessage } from '../agent/types.js';
 import { AbortSignal } from 'node-abort-controller';
-import { createComponentLogger } from '../../utils/log';
+import { createComponentLogger } from '../../shared/logging/log.js';
 import { randomUUID } from 'crypto';
-import { getProviderApiKey } from '../../utils/config';
-import { normalizeContentFromAPI } from '../../utils/messages';
-import Anthropic, { APIError, ContentBlock } from '@anthropic-ai/sdk';
-import { addToTotalCost } from '../../cost-tracker';
-import { splitSysPromptPrefix, getCLISyspromptPrefix } from '../constants/prompts';
+import { getProviderApiKey } from '../../shared/config/index.js';
+import { normalizeContentFromAPI } from '../../shared/messages.js';
+import Anthropic, { APIError } from '@anthropic-ai/sdk';
+import { addToTotalCost } from '../../cost-tracker.js';
+import { splitSysPromptPrefix, getCLISyspromptPrefix } from '../constants/prompts.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { createHash } from 'crypto';
-import { logEvent } from '../../services/statsig';
-import { withVCR } from '../../services/vcr';
+import { logEvent } from '../../services/statsig.js';
+import { withVCR } from '../../services/vcr.js';
 
 // Create a logger for this component
 const logger = createComponentLogger('AnthropicProvider');
@@ -127,9 +127,9 @@ export class AnthropicProvider extends BaseProvider {
       const toolSchemas = await Promise.all(
         tools.map(async tool => ({
           name: tool.name,
-          description: await tool.prompt({
-            dangerouslySkipPermissions: false, // Always respect permissions in new system
-          }),
+          description: typeof tool.description === 'function' 
+            ? await tool.description({}) 
+            : tool.description,
           input_schema: ('inputJSONSchema' in tool && tool.inputJSONSchema
             ? tool.inputJSONSchema
             : zodToJsonSchema(tool.inputSchema)),
@@ -148,8 +148,7 @@ export class AnthropicProvider extends BaseProvider {
           max_tokens: maxTokens || 4000,
           temperature: 1.0,
           tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-        }, {
-          signal
+          signal: signal
         });
         
         logger.debug(`API call completed in ${Date.now() - start}ms`);

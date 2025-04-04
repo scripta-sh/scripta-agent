@@ -3,11 +3,11 @@
  * Migrated from src/query.ts
  */
 
-import { BashTool } from '../tools/shell';
-import type { Tool } from '../tools/types';
-import { getCwd } from '../../utils/state';
-import { UserMessage, AssistantMessage, BinaryFeedbackResult, ToolUseContext } from './types';
-import { shouldUseBinaryFeedback, messagePairValidForBinaryFeedback } from '../../cli/components/binary-feedback/utils';
+import { BashTool } from '../tools/shell/BashTool/BashTool.js';
+import type { Tool } from '../tools/types.js';
+import { getCwd } from '../../shared/config/state.js';
+import { UserMessage, AssistantMessage, BinaryFeedbackResult, ToolUseContext } from './types.js';
+import { shouldUseBinaryFeedback, messagePairValidForBinaryFeedback } from '../../shared/binary-feedback/utils.js';
 
 /**
  * Normalizes tool input based on tool type
